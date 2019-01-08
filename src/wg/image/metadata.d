@@ -45,8 +45,10 @@ struct CommonMetadata
 {
     enum char[4] ID = "META";
 
-    float pixelAspect = 1.0f;
-    short[2] dpi = [ 96, 96 ];
+    float pixelAspect = 1.0f; // defined as w/h; animorphic images > 1.0
+    float horizDpi = 0; // image has no associated physical units
+
+    float[2] getDPI() const { return [horizDpi, horizDpi / pixelAspect]; }
 }
 
 float getPixelAspect(ref const(ImageBuffer) image)
@@ -59,4 +61,3 @@ float getAspectRatio(ref const(ImageBuffer) image)
 {
     return cast(float)image.width / cast(float)image.height * image.getPixelAspect();
 }
-
