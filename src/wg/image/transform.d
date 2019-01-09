@@ -9,9 +9,11 @@ enum isImageBuffer(T) = is(T == ImageBuffer) || is(T == Image!U, U);
 
 Image crop(Image)(ref Image image, uint left, uint right, uint top, uint bottom) if (isImageBuffer!Image)
 {
+    assert((image.elementBits & 7) == 0);
     assert(right >= left && bottom >= top);
+
     Image r = image;
-    r.data += top*image.rowPitch + left*image.elementBytes;
+    r.data += top*image.rowPitch + left*image.elementBits / 8;
     r.width = right - left;
     r.height = bottom - top;
     return r;
