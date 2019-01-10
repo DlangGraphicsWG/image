@@ -1,0 +1,3 @@
+module wg.color.color;
+
+// basic RGB colours...
