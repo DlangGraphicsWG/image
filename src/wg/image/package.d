@@ -9,6 +9,9 @@ import wg.image.format;
 enum isImage(T) = true; // does T look like an image?
 enum isValidPixelType(T) = true; // is T a valid image element type?
 
+/// Typed wrapper over ImageBuffer.
+/// It can confirm the formats are matching once at association, and then any further 
+/// runtime metadata checks can be handled by the type-checker instead.
 struct Image(ElementType)
 {
     static assert(isValidPixelType!ElementType, "Image must have a valid element type!");
