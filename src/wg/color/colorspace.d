@@ -1,3 +1,0 @@
-module wg.color.colorspace;
-
-// blah blah...
