@@ -153,6 +153,25 @@ enum gammaPair_Rec601(F) = gammaPair_HybridGamma!("Rec.601", 1.099, 0.018, 4.5, 
 /** Rec.2020 hybrid linear-gamma transfer functions. */
 enum gammaPair_Rec2020(F) = gammaPair_HybridGamma!("Rec.2020", 1.09929682680944, 0.018053968510807, 4.5, 0.45, F);
 
+/** Find an RGB color space by name */
+immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @nogc
+{
+    foreach (ref a; csAliases)
+    {
+        if (name[] == a.alias_[])
+        {
+            name = a.name;
+            break;
+        }
+    }
+    foreach (ref def; rgbColorSpaceDefs)
+    {
+        if (name[] == def.id[])
+            return &def;
+    }
+    return null;
+}
+
 
 package:
 
@@ -176,4 +195,12 @@ __gshared immutable RGBColorSpace[] rgbColorSpaceDefs = [
     RGBColorSpace("P3D65",        "DCI-P3 D65",         gammaPair_Gamma!(2.6, float),   StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
     RGBColorSpace("P3D60",        "DCI-P3 ACES Cinema", gammaPair_Gamma!(2.6, float),   StandardIlluminant.D60, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
     RGBColorSpace("DisplayP3",    "Apple Display P3",   gammaPair_sRGB!float,           StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275))
+];
+
+struct CSAlias { string alias_, name; }
+__gshared immutable CSAlias[] csAliases = [
+    CSAlias("BT.709",  "Rec.709"),
+    CSAlias("HDTV",     "Rec.709"),
+    CSAlias("BT.2020", "Rec.2020"),
+    CSAlias("UHDTV",    "Rec.2020"),
 ];
