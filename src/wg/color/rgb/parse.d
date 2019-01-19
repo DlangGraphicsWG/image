@@ -1,5 +1,6 @@
 module wg.color.rgb.parse;
 
+import wg.color.rgb.colorspace;
 import wg.color.standard_illuminant;
 import wg.color.xyz;
 
@@ -43,4 +44,46 @@ size_t parseWhitePoint(F = float)(const(char)[] whitePoint, out xyY!F color) @tr
     }
 
     return whitePoint.length;
+}
+
+
+/**
+ * Parse gamma functions from string.
+ */
+GammaFuncPair!F parseGammaFunctions(F = float)(const(char)[] gamma) @trusted pure
+{
+    GammaFuncPair!F r;
+    assert(gamma.parseGammaFunctions(r) > 0, "Invalid gamma function"); // enforce
+    return r;
+}
+
+/**
+ * Parse gamma functions from string.
+ */
+size_t parseGammaFunctions(F = float)(const(char)[] gamma, out GammaFuncPair!F gammaFunctions) @trusted pure nothrow @nogc
+{
+    // gamma power == 1 is the linear function
+    if (gamma[] == "1")
+        gammaFunctions = gammaPair_Linear!F;
+
+    // TODO: can't generate runtime functions for custom powers. we'll just support common ones for now.
+    //       maybe we could make the gamma functions `delegate` and read the power from a closure...
+    //       but that would slow down the overwhelmingly common case! :/
+    else if (gamma[] == "1.8")
+        gammaFunctions = gammaPair_Gamma!(1.8, F);
+    else if (gamma[] == "2.2")
+        gammaFunctions = gammaPair_Gamma!(2.2, F);
+    else if (gamma[] == "2.4")
+        gammaFunctions = gammaPair_Gamma!(2.4, F);
+    else if (gamma[] == "2.6")
+        gammaFunctions = gammaPair_Gamma!(2.6, F);
+    else
+    {
+        // should the gamma functions have their own namespace?
+        immutable(RGBColorSpace)* cs = findRGBColorspace(gamma);
+        if (!cs)
+            return 0;
+        gammaFunctions = cs.gamma;
+    }
+    return gamma.length;
 }
