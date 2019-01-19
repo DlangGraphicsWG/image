@@ -7,6 +7,7 @@
  */
 module wg.color.rgb.colorspace;
 
+import wg.color.standard_illuminant;
 import wg.color.xyz : xyY;
 
 import wg.util.format : formatReal;
@@ -151,3 +152,28 @@ enum gammaPair_Rec601(F) = gammaPair_HybridGamma!("Rec.601", 1.099, 0.018, 4.5, 
 
 /** Rec.2020 hybrid linear-gamma transfer functions. */
 enum gammaPair_Rec2020(F) = gammaPair_HybridGamma!("Rec.2020", 1.09929682680944, 0.018053968510807, 4.5, 0.45, F);
+
+
+package:
+
+__gshared immutable RGBColorSpace[] rgbColorSpaceDefs = [
+    RGBColorSpace("sRGB",         "sRGB",               gammaPair_sRGB!float,           StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212656), xyY(0.3000, 0.6000, 0.715158), xyY(0.1500, 0.0600, 0.072186)),
+
+    RGBColorSpace("NTSC1953",     "NTSC 1953",          gammaPair_Rec601!float,         StandardIlluminant.C,   xyY(0.6700, 0.3300, 0.299000), xyY(0.2100, 0.7100, 0.587000), xyY(0.1400, 0.0800, 0.114000)),
+    RGBColorSpace("NTSC",         "Rec.601 NTSC",       gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
+    RGBColorSpace("NTSC-J",       "Rec.601 NTSC-J",     gammaPair_Rec601!float,         StandardIlluminant.D93, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
+    RGBColorSpace("PAL/SECAM",    "Rec.601 PAL/SECAM",  gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.299000), xyY(0.2900, 0.6000, 0.587000), xyY(0.1500, 0.0600, 0.114000)),
+    RGBColorSpace("Rec.709",      "Rec.709 HDTV",       gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212600), xyY(0.3000, 0.6000, 0.715200), xyY(0.1500, 0.0600, 0.072200)),
+    RGBColorSpace("Rec.2020",     "Rec.2020 UHDTV",     gammaPair_Rec2020!float,        StandardIlluminant.D65, xyY(0.7080, 0.2920, 0.262700), xyY(0.1700, 0.7970, 0.678000), xyY(0.1310, 0.0460, 0.059300)),
+
+    RGBColorSpace("AdobeRGB",     "Adobe RGB",          gammaPair_Gamma!(2.2, float),   StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.297361), xyY(0.2100, 0.7100, 0.627355), xyY(0.1500, 0.0600, 0.075285)),
+    RGBColorSpace("WideGamutRGB", "Wide Gamut RGB",     gammaPair_Gamma!(2.2, float),   StandardIlluminant.D50, xyY(0.7350, 0.2650, 0.258187), xyY(0.1150, 0.8260, 0.724938), xyY(0.1570, 0.0180, 0.016875)),
+    RGBColorSpace("AppleRGB",     "Apple RGB",          gammaPair_Gamma!(1.8, float),   StandardIlluminant.D65, xyY(0.6250, 0.3400, 0.244634), xyY(0.2800, 0.5950, 0.672034), xyY(0.1550, 0.0700, 0.083332)),
+    RGBColorSpace("ProPhoto",     "ProPhoto",           gammaPair_Gamma!(1.8, float),   StandardIlluminant.D50, xyY(0.7347, 0.2653, 0.288040), xyY(0.1596, 0.8404, 0.711874), xyY(0.0366, 0.0001, 0.000086)),
+    RGBColorSpace("CIERGB",       "CIE RGB",            gammaPair_Gamma!(2.2, float),   StandardIlluminant.E,   xyY(0.7350, 0.2650, 0.176204), xyY(0.2740, 0.7170, 0.812985), xyY(0.1670, 0.0090, 0.010811)),
+
+    RGBColorSpace("P3DCI",        "DCI-P3 Theater",     gammaPair_Gamma!(2.6, float),   StandardIlluminant.DCI, xyY(0.6800, 0.3200, 0.228975), xyY(0.2650, 0.6900, 0.691739), xyY(0.1500, 0.0600, 0.079287)),
+    RGBColorSpace("P3D65",        "DCI-P3 D65",         gammaPair_Gamma!(2.6, float),   StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
+    RGBColorSpace("P3D60",        "DCI-P3 ACES Cinema", gammaPair_Gamma!(2.6, float),   StandardIlluminant.D60, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
+    RGBColorSpace("DisplayP3",    "Apple Display P3",   gammaPair_sRGB!float,           StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275))
+];
