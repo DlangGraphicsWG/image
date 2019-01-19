@@ -4,13 +4,89 @@ import wg.color.rgb.colorspace;
 import wg.color.standard_illuminant;
 import wg.color.xyz;
 
+/**
+ * Parse RGB color space from string.
+ */
+RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
+{
+    RGBColorSpace r;
+    assert(str.parseRGBColorSpace(r) > 0); // enforce
+    return r;
+}
+
+/**
+ * Parse RGB color space from string.
+ */
+size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure nothrow @nogc
+{
+    static const(char)[] popBackToken(ref const(char)[] format, char delim)
+    {
+        size_t i = format.length;
+        while (i > 0) if (format[--i] == delim)
+        {
+            const(char)[] r = format[i + 1 .. $];
+            format = format[0 .. i];
+            return r;
+        }
+        return null;
+    }
+
+    const(char)[] s = str;
+
+    // take optional gamma and whitepoint from back of string
+    const(char)[] gamma = popBackToken(s, '^');         // Eg: `^2.4`
+    const(char)[] whitePoint = popBackToken(s, '@');    // Eg: `@D65`
+
+    // find a satandard colour space
+    immutable(RGBColorSpace)* found = findRGBColorspace(s);
+    if (found)
+    {
+        cs = *found;
+    }
+    else
+    {
+        // custom colour space in the form: `R{x,y,Y}G{x,y,Y}B{x,y,Y}`
+
+        // parse red-point: `R{x,y,Y}`
+        if (!s.length || s[0] != 'R')
+            return 0;
+        size_t taken = s[1 .. $].parseXYZ!xyY(cs.red);
+        if (!taken)
+            return 0;
+        s = s[1 + taken .. $];
+
+        // parse green-point: `G{x,y,Y}`
+        if (!s.length || s[0] != 'G')
+            return 0;
+        taken = s[1 .. $].parseXYZ!xyY(cs.green);
+        if (!taken)
+            return 0;
+        s = s[1 + taken .. $];
+
+        // parse blue-point: `B{x,y,Y}`
+        if (!s.length || s[0] != 'B')
+            return 0;
+        taken = s[1 .. $].parseXYZ!xyY(cs.blue);
+        if (!taken || taken + 1 != s.length)
+            return 0;
+    }
+
+    // parse the gamma and whitepoint overrides
+    if (whitePoint.length > 0 && !whitePoint.parseWhitePoint(cs.white))
+        return 0;
+    if (gamma.length > 0 && !gamma.parseGammaFunctions!float(cs.gamma))
+        return 0;
+
+    return str.length;
+}
+
 // TODO: should these functions just be `float` instead of `F`?
 /**
  * Parse white point from string.
  */
-xyY!F parseWhitePoint(F = float)(const(char)[] whitePoint) @trusted pure
+xyY parseWhitePoint(const(char)[] whitePoint) @trusted pure
 {
-    xyY!F r;
+    xyY r;
     assert(whitePoint.parseWhitePoint(r) > 0); // enforce
     return r;
 }
@@ -18,7 +94,7 @@ xyY!F parseWhitePoint(F = float)(const(char)[] whitePoint) @trusted pure
 /**
  * Parse white point from string.
  */
-size_t parseWhitePoint(F = float)(const(char)[] whitePoint, out xyY!F color) @trusted pure nothrow @nogc
+size_t parseWhitePoint(const(char)[] whitePoint, out xyY color) @trusted pure nothrow @nogc
 {
     if (!whitePoint.length)
         return 0;
@@ -28,20 +104,8 @@ size_t parseWhitePoint(F = float)(const(char)[] whitePoint, out xyY!F color) @tr
         return whitePoint.parseXYZ(color);
 
     // assume a standard illuminant
-    static if (is(F == float))
-    {
-        // `float` path, support NRVO!
-        if (!whitePoint.getStandardIlluminant(color))
-            return 0;
-    }
-    else
-    {
-        // convert to higher-precision
-        xyY!float r;
-        if (!whitePoint.getStandardIlluminant(r))
-            return 0;
-        color = xyY!F(r.x, r.y, r.Y);
-    }
+    if (!whitePoint.getStandardIlluminant(color))
+        return 0;
 
     return whitePoint.length;
 }
