@@ -17,7 +17,8 @@ RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
 /**
  * Parse RGB color space from string.
  */
-size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure nothrow @nogc
+// TODO: `cs` should be `out`, but that doesn't work with CTFE for some reason!
+size_t parseRGBColorSpace(const(char)[] str, ref RGBColorSpace cs) @trusted pure nothrow @nogc
 {
     static const(char)[] popBackToken(ref const(char)[] format, char delim)
     {
@@ -69,6 +70,10 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
         taken = s[1 .. $].parseXYZ!xyY(cs.blue);
         if (!taken || taken + 1 != s.length)
             return 0;
+
+        // default to sRGB white and gamma
+        cs.white = StandardIlluminant.D65;
+        cs.gamma = gammaPair_sRGB!float;
     }
 
     // parse the gamma and whitepoint overrides
