@@ -13,40 +13,32 @@ Copyright:  Copyright (c) 2019, Manu Evans.
 */
 module wg.color.xyz;
 
-import wg.util.traits : isFloatingPoint;
-
 /**
 A CIE 1931 XYZ color, parameterised for component type.
 */
-struct XYZ(F = float) if (isFloatingPoint!F)
+struct XYZ
 {
 @safe pure nothrow @nogc:
 
-    /** Type of the color components. */
-    alias ComponentType = F;
-
     /** X value. */
-    F X = 0;
+    float X = 0;
     /** Y value. */
-    F Y = 0;
+    float Y = 0;
     /** Z value. */
-    F Z = 0;
+    float Z = 0;
 }
 
 /**
 A CIE 1931 xyY color, parameterised for component type.
 */
-struct xyY(F = float) if (isFloatingPoint!F)
+struct xyY
 {
 @safe pure nothrow @nogc:
 
-    /** Type of the color components. */
-    alias ComponentType = F;
-
     /** x coordinate. */
-    F x = 0;
+    float x = 0;
     /** y coordinate. */
-    F y = 0;
+    float y = 0;
     /** Y value (luminance). */
-    F Y = 0;
+    float Y = 0;
 }
