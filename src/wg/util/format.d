@@ -9,7 +9,7 @@ string formatInt(I)(I i, uint minSize = 0) @safe pure nothrow
 {
     char[21] buffer;
     char[] r = formatInt!I(i, buffer, minSize);
-    return cast(string)null ~ r;
+    return "" ~ r;
 }
 
 /**
@@ -63,7 +63,7 @@ string formatReal(F)(F f, uint decimals = 3) @safe pure nothrow
 {
     char[22] buffer;
     char[] r = formatReal!F(f, buffer, decimals);
-    return cast(string)null ~ r;
+    return "" ~ r;
 }
 
 /**
