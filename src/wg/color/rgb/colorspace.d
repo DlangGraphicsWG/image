@@ -11,6 +11,7 @@ import wg.color.standard_illuminant;
 import wg.color.xyz : xyY;
 
 import wg.util.format : formatReal;
+import wg.util.parse : parseReal;
 import wg.util.traits : isFloatingPoint;
 
 
@@ -21,13 +22,13 @@ import wg.util.traits : isFloatingPoint;
 struct RGBColorSpace
 {
     /** Color space identifier. */
-    string id;
+    const(char)[] id;
 
     /** Color space name. */
     string name;
 
-    /** Functions that converts linear luminance to/from gamma space. */
-    GammaFuncPair!float gamma;
+    /** Gamma compression technique. */
+    const(char)[] gamma;
 
     /** White point. */
     xyY white;
@@ -56,6 +57,43 @@ struct GammaFuncPair(F) if (isFloatingPoint!F)
     GammaFunc toLinear;
 }
 
+/**
+ Pair of named gamma functions from string.
+ */
+struct GammaFuncPair(string func, F = float) if (isFloatingPoint!F)
+{
+    enum name = func;
+
+    static if (func[] == "sRGB")
+    {
+        alias toGamma = linearToHybridGamma!(1.055, 0.0031308, 12.92, 1/2.4, F);
+        alias toLinear = hybridGammaToLinear!(1.055, 0.0031308, 12.92, 2.4, F);
+    }
+    else static if (func[] == "Rec.601")
+    {
+        alias toGamma = linearToHybridGamma!(1.099, 0.018, 4.5, 0.45, F);
+        alias toLinear = hybridGammaToLinear!(1.099, 0.018, 4.5, 1/0.45, F);
+    }
+    else static if (func[] == "Rec.2020")
+    {
+        alias toGamma = linearToHybridGamma!(1.09929682680944, 0.018053968510807, 4.5, 0.45, F);
+        alias toLinear = hybridGammaToLinear!(1.09929682680944, 0.018053968510807, 4.5, 1/0.45, F);
+    }
+    else static if (func[] == "1")
+    {
+        alias toGamma = (F v) => v;
+        alias toLinear = (F v) => v;
+    }
+    else static if (parseReal(func) == func.length)
+    {
+        enum F gamma = parseReal(func);
+
+        alias toGamma = linearToGamma!(gamma, F);
+        alias toLinear = gammaToLinear!(gamma, F);
+    }
+    else
+        static assert(false, "Function is not a named gamma function or a gamma power");
+}
 
 /** Linear to gamma transfer function. */
 T linearToGamma(double gamma, T)(T v) if (isFloatingPoint!T)
@@ -90,6 +128,8 @@ T linearToHybridGamma(double a, double b, double s, double e, T)(T v) if (isFloa
 ///
 unittest
 {
+    import std.math : abs;
+
     // sRGB parameters
     enum a = 1.055;
     enum b = 0.0031308;
@@ -118,6 +158,8 @@ T hybridGammaToLinear(double a, double b, double s, double e, T)(T v) if (isFloa
 ///
 unittest
 {
+    import std.math : abs;
+
     // sRGB parameters
     enum a = 1.055;
     enum b = 0.0031308;
@@ -134,24 +176,6 @@ unittest
 
     assert(abs(v - hybridGammaToLinear!(a, b, s, e)(0.5)) < double.epsilon);
 }
-
-/** Linear transfer functions. (these are a no-op, conversion from linear <-> linear is the `^^1` function) */
-enum gammaPair_Linear(F) = GammaFuncPair!F("1", null, null);
-
-/** Gamma transfer functions. */
-enum gammaPair_Gamma(double gamma, F) = GammaFuncPair!F(formatReal!double(gamma, 2), &linearToGamma!(gamma, F), &gammaToLinear!(gamma, F));
-
-/** Pparametric hybrid linear-gamma transfer functions. */
-enum gammaPair_HybridGamma(string name, double a, double b, double s, double e, F) = GammaFuncPair!F(name, &linearToHybridGamma!(a, b, s, e, F), &hybridGammaToLinear!(a, b, s, 1 / e, F));
-
-/** sRGB hybrid linear-gamma transfer functions. */
-enum gammaPair_sRGB(F)  = gammaPair_HybridGamma!("sRGB", 1.055, 0.0031308, 12.92, 1/2.4, F);
-
-/** Rec.601 hybrid linear-gamma transfer functions. Note, Rec.709 also uses these functions. */
-enum gammaPair_Rec601(F) = gammaPair_HybridGamma!("Rec.601", 1.099, 0.018, 4.5, 0.45, F);
-
-/** Rec.2020 hybrid linear-gamma transfer functions. */
-enum gammaPair_Rec2020(F) = gammaPair_HybridGamma!("Rec.2020", 1.09929682680944, 0.018053968510807, 4.5, 0.45, F);
 
 /** Find an RGB color space by name */
 immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @nogc
@@ -172,35 +196,175 @@ immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @no
     return null;
 }
 
+float toMonochrome(alias cs)(float r, float g, float b) pure
+{
+    return cs.red.Y*r + cs.green.Y*g + cs.blue.Y*b;
+}
+float toGrayscale(const(RGBColorSpace) cs, T, U, V)(T r, U g, V b) pure
+{
+    return toGrayscale!cs(cast(float)r, cast(float)g, cast(float)b);
+}
+
+/**
+ * Parse RGB color space from string.
+ */
+RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
+{
+    import std.exception : enforce;
+
+    RGBColorSpace r;
+    enforce(str.parseRGBColorSpace(r) > 0, "Invalid RGB color space descriptor: " ~ str);
+
+    // dup the strings if they point internally
+    if (r.id == str)
+        r.id = r.id.idup;
+    if (r.gamma.isSubString(str))
+        r.gamma = r.gamma.idup;
+    return r;
+}
+
+// TODO: @nogc version
+
+/**
+ * Parse white point from string.
+ */
+xyY parseWhitePoint(const(char)[] whitePoint) @trusted pure
+{
+    import std.exception : enforce;
+
+    xyY r;
+    enforce(whitePoint.parseWhitePoint(r) > 0, "Invalid whitepoint: " ~ whitePoint);
+    return r;
+}
+
+/**
+ * Parse white point from string.
+ */
+size_t parseWhitePoint(const(char)[] whitePoint, out xyY color) @trusted pure nothrow @nogc
+{
+    import wg.color.xyz : parseXYZ;
+
+    if (!whitePoint.length)
+        return 0;
+
+    // check for custom white point
+    if (whitePoint[0] == '{')
+        return whitePoint.parseXYZ(color);
+
+    // assume a standard illuminant
+    if (!whitePoint.getStandardIlluminant(color))
+        return 0;
+
+    return whitePoint.length;
+}
+
 
 package:
 
-__gshared immutable RGBColorSpace[] rgbColorSpaceDefs = [
-    RGBColorSpace("sRGB",         "sRGB",               gammaPair_sRGB!float,           StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212656), xyY(0.3000, 0.6000, 0.715158), xyY(0.1500, 0.0600, 0.072186)),
+static immutable RGBColorSpace[] rgbColorSpaceDefs = [
+    RGBColorSpace("sRGB",         "sRGB",               "sRGB",     StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212656), xyY(0.3000, 0.6000, 0.715158), xyY(0.1500, 0.0600, 0.072186)),
 
-    RGBColorSpace("NTSC1953",     "NTSC 1953",          gammaPair_Rec601!float,         StandardIlluminant.C,   xyY(0.6700, 0.3300, 0.299000), xyY(0.2100, 0.7100, 0.587000), xyY(0.1400, 0.0800, 0.114000)),
-    RGBColorSpace("NTSC",         "Rec.601 NTSC",       gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
-    RGBColorSpace("NTSC-J",       "Rec.601 NTSC-J",     gammaPair_Rec601!float,         StandardIlluminant.D93, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
-    RGBColorSpace("PAL/SECAM",    "Rec.601 PAL/SECAM",  gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.299000), xyY(0.2900, 0.6000, 0.587000), xyY(0.1500, 0.0600, 0.114000)),
-    RGBColorSpace("Rec.709",      "Rec.709 HDTV",       gammaPair_Rec601!float,         StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212600), xyY(0.3000, 0.6000, 0.715200), xyY(0.1500, 0.0600, 0.072200)),
-    RGBColorSpace("Rec.2020",     "Rec.2020 UHDTV",     gammaPair_Rec2020!float,        StandardIlluminant.D65, xyY(0.7080, 0.2920, 0.262700), xyY(0.1700, 0.7970, 0.678000), xyY(0.1310, 0.0460, 0.059300)),
+    RGBColorSpace("NTSC1953",     "NTSC 1953",          "Rec.601",  StandardIlluminant.C,   xyY(0.6700, 0.3300, 0.299000), xyY(0.2100, 0.7100, 0.587000), xyY(0.1400, 0.0800, 0.114000)),
+    RGBColorSpace("NTSC",         "Rec.601 NTSC",       "Rec.601",  StandardIlluminant.D65, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
+    RGBColorSpace("NTSC-J",       "Rec.601 NTSC-J",     "Rec.601",  StandardIlluminant.D93, xyY(0.6300, 0.3400, 0.299000), xyY(0.3100, 0.5950, 0.587000), xyY(0.1550, 0.0700, 0.114000)),
+    RGBColorSpace("PAL/SECAM",    "Rec.601 PAL/SECAM",  "Rec.601",  StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.299000), xyY(0.2900, 0.6000, 0.587000), xyY(0.1500, 0.0600, 0.114000)),
+    RGBColorSpace("Rec.709",      "Rec.709 HDTV",       "Rec.601",  StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.212600), xyY(0.3000, 0.6000, 0.715200), xyY(0.1500, 0.0600, 0.072200)),
+    RGBColorSpace("Rec.2020",     "Rec.2020 UHDTV",     "Rec.2020", StandardIlluminant.D65, xyY(0.7080, 0.2920, 0.262700), xyY(0.1700, 0.7970, 0.678000), xyY(0.1310, 0.0460, 0.059300)),
 
-    RGBColorSpace("AdobeRGB",     "Adobe RGB",          gammaPair_Gamma!(2.2, float),   StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.297361), xyY(0.2100, 0.7100, 0.627355), xyY(0.1500, 0.0600, 0.075285)),
-    RGBColorSpace("WideGamutRGB", "Wide Gamut RGB",     gammaPair_Gamma!(2.2, float),   StandardIlluminant.D50, xyY(0.7350, 0.2650, 0.258187), xyY(0.1150, 0.8260, 0.724938), xyY(0.1570, 0.0180, 0.016875)),
-    RGBColorSpace("AppleRGB",     "Apple RGB",          gammaPair_Gamma!(1.8, float),   StandardIlluminant.D65, xyY(0.6250, 0.3400, 0.244634), xyY(0.2800, 0.5950, 0.672034), xyY(0.1550, 0.0700, 0.083332)),
-    RGBColorSpace("ProPhoto",     "ProPhoto",           gammaPair_Gamma!(1.8, float),   StandardIlluminant.D50, xyY(0.7347, 0.2653, 0.288040), xyY(0.1596, 0.8404, 0.711874), xyY(0.0366, 0.0001, 0.000086)),
-    RGBColorSpace("CIERGB",       "CIE RGB",            gammaPair_Gamma!(2.2, float),   StandardIlluminant.E,   xyY(0.7350, 0.2650, 0.176204), xyY(0.2740, 0.7170, 0.812985), xyY(0.1670, 0.0090, 0.010811)),
+    RGBColorSpace("AdobeRGB",     "Adobe RGB",          "2.2",      StandardIlluminant.D65, xyY(0.6400, 0.3300, 0.297361), xyY(0.2100, 0.7100, 0.627355), xyY(0.1500, 0.0600, 0.075285)),
+    RGBColorSpace("WideGamutRGB", "Wide Gamut RGB",     "2.2",      StandardIlluminant.D50, xyY(0.7350, 0.2650, 0.258187), xyY(0.1150, 0.8260, 0.724938), xyY(0.1570, 0.0180, 0.016875)),
+    RGBColorSpace("AppleRGB",     "Apple RGB",          "1.8",      StandardIlluminant.D65, xyY(0.6250, 0.3400, 0.244634), xyY(0.2800, 0.5950, 0.672034), xyY(0.1550, 0.0700, 0.083332)),
+    RGBColorSpace("ProPhoto",     "ProPhoto",           "1.8",      StandardIlluminant.D50, xyY(0.7347, 0.2653, 0.288040), xyY(0.1596, 0.8404, 0.711874), xyY(0.0366, 0.0001, 0.000086)),
+    RGBColorSpace("CIERGB",       "CIE RGB",            "2.2",      StandardIlluminant.E,   xyY(0.7350, 0.2650, 0.176204), xyY(0.2740, 0.7170, 0.812985), xyY(0.1670, 0.0090, 0.010811)),
 
-    RGBColorSpace("P3DCI",        "DCI-P3 Theater",     gammaPair_Gamma!(2.6, float),   StandardIlluminant.DCI, xyY(0.6800, 0.3200, 0.228975), xyY(0.2650, 0.6900, 0.691739), xyY(0.1500, 0.0600, 0.079287)),
-    RGBColorSpace("P3D65",        "DCI-P3 D65",         gammaPair_Gamma!(2.6, float),   StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
-    RGBColorSpace("P3D60",        "DCI-P3 ACES Cinema", gammaPair_Gamma!(2.6, float),   StandardIlluminant.D60, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
-    RGBColorSpace("DisplayP3",    "Apple Display P3",   gammaPair_sRGB!float,           StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275))
+    RGBColorSpace("P3DCI",        "DCI-P3 Theater",     "2.6",      StandardIlluminant.DCI, xyY(0.6800, 0.3200, 0.228975), xyY(0.2650, 0.6900, 0.691739), xyY(0.1500, 0.0600, 0.079287)),
+    RGBColorSpace("P3D65",        "DCI-P3 D65",         "2.6",      StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
+    RGBColorSpace("P3D60",        "DCI-P3 ACES Cinema", "2.6",      StandardIlluminant.D60, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275)),
+    RGBColorSpace("DisplayP3",    "Apple Display P3",   "sRGB",     StandardIlluminant.D65, xyY(0.6800, 0.3200, 0.228973), xyY(0.2650, 0.6900, 0.691752), xyY(0.1500, 0.0600, 0.079275))
 ];
 
 struct CSAlias { string alias_, name; }
-__gshared immutable CSAlias[] csAliases = [
+static immutable CSAlias[] csAliases = [
     CSAlias("BT.709",  "Rec.709"),
-    CSAlias("HDTV",     "Rec.709"),
+    CSAlias("HDTV",    "Rec.709"),
     CSAlias("BT.2020", "Rec.2020"),
-    CSAlias("UHDTV",    "Rec.2020"),
+    CSAlias("UHDTV",   "Rec.2020"),
 ];
+
+size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure nothrow @nogc
+{
+    static const(char)[] popBackToken(ref const(char)[] format, char delim)
+    {
+        size_t i = format.length;
+        while (i > 0) if (format[--i] == delim)
+        {
+            const(char)[] r = format[i + 1 .. $];
+            format = format[0 .. i];
+            return r;
+        }
+        return null;
+    }
+
+    const(char)[] s = str;
+
+    // take optional gamma and whitepoint from back of string
+    const(char)[] gamma = popBackToken(s, '^');         // Eg: `^2.4`
+    const(char)[] whitePoint = popBackToken(s, '@');    // Eg: `@D65`
+
+    // find a satandard colour space
+    immutable(RGBColorSpace)* found = findRGBColorspace(s);
+    if (found)
+    {
+        cs = *found;
+    }
+    else
+    {
+        import wg.color.xyz : parseXYZ;
+
+        // custom colour space in the form: `R{x,y,Y}G{x,y,Y}B{x,y,Y}`
+
+        // parse red-point: `R{x,y,Y}`
+        if (!s.length || s[0] != 'R')
+            return 0;
+        size_t taken = s[1 .. $].parseXYZ!xyY(cs.red);
+        if (!taken)
+            return 0;
+        s = s[1 + taken .. $];
+
+        // parse green-point: `G{x,y,Y}`
+        if (!s.length || s[0] != 'G')
+            return 0;
+        taken = s[1 .. $].parseXYZ!xyY(cs.green);
+        if (!taken)
+            return 0;
+        s = s[1 + taken .. $];
+
+        // parse blue-point: `B{x,y,Y}`
+        if (!s.length || s[0] != 'B')
+            return 0;
+        taken = s[1 .. $].parseXYZ!xyY(cs.blue);
+        if (!taken || taken + 1 != s.length)
+            return 0;
+
+        // default to sRGB white and gamma
+        cs.white = StandardIlluminant.D65;
+        cs.gamma = "sRGB";
+    }
+
+    // parse the gamma and whitepoint overrides
+    if (whitePoint.length > 0 && !whitePoint.parseWhitePoint(cs.white))
+        return 0;
+    if (gamma.length > 0)
+        cs.gamma = gamma;
+
+    // assign the id if it's non-standard
+    if (!found || whitePoint.length > 0 || gamma.length > 0)
+        cs.id = str;
+
+    return str.length;
+}
+
+bool isSubString(const(char)[] subStr, const(char)[] str) pure nothrow @nogc @safe
+{
+    return &str[0] <= &subStr[0] && &str[$-1] >= &subStr[$-1];
+}

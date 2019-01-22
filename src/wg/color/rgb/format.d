@@ -1,8 +1,10 @@
 module wg.color.rgb.format;
 
-import wg.color.rgb.colorspace : RGBColorSpace, findRGBColorspace;
 import wg.util.allocator;
 
+/**
+ * RGB format descriptor.
+ */
 struct RGBFormatDescriptor
 {
     enum Component : ubyte
@@ -13,10 +15,6 @@ struct RGBFormatDescriptor
         Alpha,
         Luma,
         Exponent,
-        ValueU,
-        ValueV,
-        ValueW,
-        ValueQ,
         Unused
     }
 
@@ -37,8 +35,11 @@ struct RGBFormatDescriptor
     {
         ComponentPresentMask = 0x7FF,
 
+        AnyFloating     = 1 << 10,
+        AllFloating     = 1 << 11,
+        AllSameFormat   = 1 << 12,
         AllSameSize     = 1 << 13,
-        AllByteAligned  = 1 << 14,
+        AllAligned      = 1 << 14,
         BigEndian       = 1 << 15
     }
 
@@ -56,8 +57,7 @@ struct RGBFormatDescriptor
 
     ComponentDesc[] components;
 
-    const(RGBColorSpace)* colorSpace;
-
+    const(char)[] colorSpace;
     const(char)[] userData;
 }
 
@@ -71,20 +71,14 @@ RGBFormatDescriptor parseRGBFormat(const(char)[] format) @trusted pure
     RGBFormatDescriptor r;
 
     // parse data into stack buffers
-    RGBFormatDescriptor.ComponentDesc[32] components = void;
-    RGBColorSpace cs = void;
-    string error = format.parseRGBFormat(r, components, cs);
+    RGBFormatDescriptor.ComponentDesc[6] components = void;
+    string error = format.parseRGBFormat(r, components);
     enforce(error == null, format ~ " : " ~ error);
 
     // dup components, colorSpace, and userData into gc buffers
     r.components = r.components.dup;
-    if (r.colorSpace == &cs)
-    {
-        auto copy = new RGBColorSpace;
-//        *copy = cs; // TODO: can't evaluate in ctfe? wat?
-        (*copy).tupleof = cs.tupleof; // HACK
-        r.colorSpace = copy;
-    }
+    if (r.colorSpace.isSubString(format))
+        r.colorSpace = r.colorSpace.idup;
     if (r.userData)
         r.userData = r.userData.idup;
 
@@ -93,49 +87,46 @@ RGBFormatDescriptor parseRGBFormat(const(char)[] format) @trusted pure
 ///
 unittest
 {
-    import wg.color.standard_illuminant;
+    // simplest format
+    RGBFormatDescriptor format = parseRGBFormat("rgb");
+    assert(format.bits == 24);
+    assert(format.alignment == 8);
+    assert(format.components.length == 3);
+    assert(format.components[0].bits == 8);
+    assert(format.components[0].format == RGBFormatDescriptor.Format.NormInt);
+    assert(!!(format.flags & RGBFormatDescriptor.Flags.AllSameSize) == true);
+    assert(!!(format.flags & RGBFormatDescriptor.Flags.AllAligned) == true);
+    assert(format.colorSpace[] == "sRGB");
 
-    RGBFormatDescriptor format = parseRGBFormat("bgra_10_10_10_2_Rec.2020@D50^2.2_BE_#userdata");
-    assert(format.bits == 32);
-    assert(format.alignment == 32);
-    assert(format.components.length == 4);
-    assert(format.components[0].type == RGBFormatDescriptor.Component.Blue);
-    assert(format.components[1].type == RGBFormatDescriptor.Component.Green);
-    assert(format.components[2].type == RGBFormatDescriptor.Component.Red);
-    assert(format.components[3].type == RGBFormatDescriptor.Component.Alpha);
-    assert(format.components[0].bits == 10);
-    assert(format.components[1].bits == 10);
-    assert(format.components[2].bits == 10);
-    assert(format.components[3].bits == 2);
-    assert(format.colorSpace.id[] == "Rec.2020");
-    assert(format.colorSpace.white == StandardIlluminant.D50);
-    assert(format.colorSpace.gamma.name[] == "2.2");
-    assert(!!(format.flags & RGBFormatDescriptor.Flags.BigEndian) == true);
-    assert(format.userData[] == "userdata");
+    // complex format
+    RGBFormatDescriptor format2 = parseRGBFormat("bgra_10_10_10_2_Rec.2020@D50^1.7_BE_#userdata");
+    assert(format2.bits == 32);
+    assert(format2.alignment == 32);
+    assert(format2.components.length == 4);
+    assert(format2.components[0].type == RGBFormatDescriptor.Component.Blue);
+    assert(format2.components[1].type == RGBFormatDescriptor.Component.Green);
+    assert(format2.components[2].type == RGBFormatDescriptor.Component.Red);
+    assert(format2.components[3].type == RGBFormatDescriptor.Component.Alpha);
+    assert(format2.components[0].bits == 10);
+    assert(format2.components[1].bits == 10);
+    assert(format2.components[2].bits == 10);
+    assert(format2.components[3].bits == 2);
+    assert(format2.colorSpace[] == "Rec.2020@D50^1.7");
+    assert(!!(format2.flags & RGBFormatDescriptor.Flags.BigEndian) == true);
+    assert(format2.userData[] == "userdata");
 
     // prove CTFE works
-    static immutable RGBFormatDescriptor format2 = parseRGBFormat("ra_f16_s8.8");
-    static assert(format2.bits == 32);
-    static assert(format2.alignment == 16);
-    static assert(format2.components.length == 2);
-    static assert(format2.components[0].type == RGBFormatDescriptor.Component.Red);
-    static assert(format2.components[1].type == RGBFormatDescriptor.Component.Alpha);
-    static assert(format2.components[0].format == RGBFormatDescriptor.Format.FloatingPoint);
-    static assert(format2.components[1].format == RGBFormatDescriptor.Format.SignedFixedPoint);
-    static assert(format2.components[0].bits == 16);
-    static assert(format2.components[1].bits == 16 && format2.components[1].fracBits == 8);
-    static assert(format2.colorSpace.id[] == "sRGB");
-
-    // simplest format
-    static immutable RGBFormatDescriptor format3 = parseRGBFormat("rgb");
-    static assert(format3.bits == 24);
-    static assert(format3.alignment == 8);
-    static assert(format3.components.length == 3);
-    static assert(format3.components[0].bits == 8);
-    static assert(format3.components[0].format == RGBFormatDescriptor.Format.NormInt);
-    static assert(!!(format3.flags & RGBFormatDescriptor.Flags.AllSameSize) == true);
-    static assert(!!(format3.flags & RGBFormatDescriptor.Flags.AllByteAligned) == true);
-    assert(format.colorSpace.id[] == "sRGB");
+    static immutable RGBFormatDescriptor format3 = parseRGBFormat("ra_f16_s8.8_AdobeRGB");
+    static assert(format3.bits == 32);
+    static assert(format3.alignment == 16);
+    static assert(format3.components.length == 2);
+    static assert(format3.components[0].type == RGBFormatDescriptor.Component.Red);
+    static assert(format3.components[1].type == RGBFormatDescriptor.Component.Alpha);
+    static assert(format3.components[0].format == RGBFormatDescriptor.Format.FloatingPoint);
+    static assert(format3.components[1].format == RGBFormatDescriptor.Format.SignedFixedPoint);
+    static assert(format3.components[0].bits == 16);
+    static assert(format3.components[1].bits == 16 && format3.components[1].fracBits == 8);
+    static assert(format3.colorSpace[] == "AdobeRGB");
 }
 
 /**
@@ -145,16 +136,17 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 {
     // parse data into stack buffers
     RGBFormatDescriptor r;
-    RGBFormatDescriptor.ComponentDesc[32] components = void;
-    RGBColorSpace cs;
-    string error = format.parseRGBFormat(r, components, cs);
+    RGBFormatDescriptor.ComponentDesc[6] components = void;
+    string error = format.parseRGBFormat(r, components);
     if (error)
         return null;
+
+    bool csNeedsAllocation = r.colorSpace.isSubString(format);
 
     // allocate a buffer sufficient for all the data
     size_t bufferSize = RGBFormatDescriptor.sizeof +
                         RGBFormatDescriptor.ComponentDesc.sizeof*r.components.length +
-                        (r.colorSpace == &cs ? RGBColorSpace.sizeof : 0) +
+                        (csNeedsAllocation ? r.colorSpace.length : 0) +
                         r.userData.length;
     void[] buffer = allocator.allocate(bufferSize);
 
@@ -169,12 +161,12 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
     char* userData = cast(char*)&fmt.components.ptr[fmt.components.length];
 
     // copy the color space if it's not a standard
-    if (r.colorSpace == &cs)
+    if (csNeedsAllocation)
     {
-        RGBColorSpace* newCs = cast(RGBColorSpace*)userData;
-        userData += RGBColorSpace.sizeof;
-        *newCs = *r.colorSpace;
-        fmt.colorSpace = newCs;
+        char[] cs = (cast(char*)userData)[0 .. r.colorSpace.length];
+        userData += r.colorSpace.length;
+        cs[] = r.colorSpace[];
+        fmt.colorSpace = cs;
     }
 
     // copy userData
@@ -186,13 +178,127 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 
     return fmt;
 }
+///
+unittest
+{
+    import wg.util.allocator;
+    Allocator gcAlloc = getGcAllocator();
+
+    RGBFormatDescriptor* format = parseRGBFormat("bgra_10_10_10_2_Rec.2020@D50^1.7_BE_#userdata", &gcAlloc);
+    assert(format.bits == 32);
+    assert(format.alignment == 32);
+    assert(format.components.length == 4);
+    assert(format.components[0].type == RGBFormatDescriptor.Component.Blue);
+    assert(format.components[1].type == RGBFormatDescriptor.Component.Green);
+    assert(format.components[2].type == RGBFormatDescriptor.Component.Red);
+    assert(format.components[3].type == RGBFormatDescriptor.Component.Alpha);
+    assert(format.components[0].bits == 10);
+    assert(format.components[1].bits == 10);
+    assert(format.components[2].bits == 10);
+    assert(format.components[3].bits == 2);
+    assert(format.colorSpace[] == "Rec.2020@D50^1.7");
+    assert(!!(format.flags & RGBFormatDescriptor.Flags.BigEndian) == true);
+    assert(format.userData[] == "userdata");
+}
+
+/**
+ * Make format string from RGB format descriptor.
+ */
+string makeFormatString(const(RGBFormatDescriptor) desc) @safe pure nothrow
+{
+    import wg.util.format : formatInt;
+
+    alias Component = RGBFormatDescriptor.Component;
+    alias Format = RGBFormatDescriptor.Format;
+
+    string format;
+    bool needsElementFormat = false;
+
+    foreach (ref e; desc.components)
+    {
+        if (e.format != Format.NormInt || e.bits != 8)
+            needsElementFormat = true;
+        final switch (e.type)
+        {
+            case Component.Red:     format ~= 'r'; break;
+            case Component.Green:   format ~= 'g'; break;
+            case Component.Blue:    format ~= 'b'; break;
+            case Component.Alpha:   format ~= 'a'; break;
+            case Component.Luma:    format ~= 'l'; break;
+            case Component.Exponent:format ~= 'e'; break;
+            case Component.Unused:  format ~= 'x'; break;
+        }
+    }
+
+    if (needsElementFormat)
+    {
+        foreach (ref e; desc.components)
+        {
+            switch (e.format)
+            {
+                case Format.SignedNormInt:
+                case Format.SignedFixedPoint:   format ~= "_s"; break;
+                case Format.FloatingPoint:      format ~= "_f"; break;
+                case Format.UnsignedInt:        format ~= "_u"; break;
+                case Format.SignedInt:          format ~= "_i"; break;
+                default:                        format ~= '_';  break;
+            }
+            format ~= formatInt!int(e.bits - e.fracBits);
+            if (e.fracBits)
+                format ~= '.' ~ formatInt!int(e.fracBits);
+        }
+    }
+
+    if (desc.colorSpace[] != "sRGB")
+        format ~= '_' ~ desc.colorSpace;
+
+    if (desc.flags & RGBFormatDescriptor.Flags.BigEndian)
+        format ~= "_BE";
+
+    if (desc.userData)
+        format ~= "_#" ~ desc.userData;
+
+    return format;
+}
+
+/**
+* Canonicalise RGB format string.
+*/
+string canonicalFormat(const(char)[] format) @trusted pure
+{
+    import std.exception : enforce;
+
+    RGBFormatDescriptor fmt;
+    RGBFormatDescriptor.ComponentDesc[6] components = void;
+    string error = format.parseRGBFormat(fmt, components);
+    enforce(error == null,"Invalid RGB format descriptor: " ~ format);
+    // TODO: accept an output buffer...
+    return makeFormatString(fmt);
+}
+///
+unittest
+{
+    static assert(canonicalFormat("rgb") == "rgb");
+    static assert(canonicalFormat("rgb_8_8_8") == "rgb");
+    static assert(canonicalFormat("rgb_sRGB") == "rgb");
+    static assert(canonicalFormat("rgb_8_8_8_sRGB") == "rgb");
+//    static assert(canonicalFormat("rgb_8_8_8_sRGB@D65") == "rgb");  // TODO: simplify colour spaces
+//    static assert(canonicalFormat("rgb_8_8_8_sRGB^sRGB") == "rgb"); // TODO: simplify colour spaces
+    static assert(canonicalFormat("rgb_8_8_8_sRGB@D50") == "rgb_sRGB@D50");
+    static assert(canonicalFormat("rgb_8_8_8_sRGB_BE_#data") == "rgb_BE_#data");
+    static assert(canonicalFormat("rgba_10_10_10_2_sRGB@D50") == "rgba_10_10_10_2_sRGB@D50");
+}
 
 
 private:
 
-string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGBFormatDescriptor.ComponentDesc[32] components, ref RGBColorSpace cs) @trusted pure nothrow @nogc
+string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGBFormatDescriptor.ComponentDesc[6] components) @trusted pure nothrow @nogc
 {
-    import wg.color.rgb.parse : parseRGBColorSpace;
+    import wg.color.rgb.colorspace : RGBColorSpace, findRGBColorspace, parseRGBColorSpace;
+
+    alias Component = RGBFormatDescriptor.Component;
+    alias Format = RGBFormatDescriptor.Format;
+    alias Flags = RGBFormatDescriptor.Flags;
 
     // TODO: move this to util?
     static const(char)[] popBackToken(ref const(char)[] format, char delim)
@@ -208,11 +314,10 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
     }
 
     // look-up table for color components
-    alias Component = RGBFormatDescriptor.Component;
     static immutable ubyte[26] componentMap = [
-        Component.Alpha, Component.Blue, 0xFF, 0xFF, Component.Exponent, 0xFF, Component.Green, 0xFF,    // A - H
-        0xFF, 0xFF, 0xFF, Component.Luma, 0xFF, 0xFF, 0xFF, 0xFF, Component.ValueQ, Component.Red, 0xFF, // I - S
-        0xFF, Component.ValueU, Component.ValueV, Component.ValueW, Component.Unused, 0xFF, 0xFF         // T - Z
+        Component.Alpha, Component.Blue, 0xFF, 0xFF, Component.Exponent, 0xFF,                // A - F
+        Component.Green, 0xFF, 0xFF, 0xFF, 0xFF, Component.Luma, 0xFF, 0xFF, 0xFF,            // G - O
+        0xFF, 0xFF, Component.Red, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, Component.Unused, 0xFF, 0xFF // P - Z
     ];
 
     // parse components
@@ -224,7 +329,11 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
             return "Too many components in RGB color format";
         if (c < 'a' || c > 'z' || componentMap[c - 'a'] == 0xFF)
             return "Not an RGB color format";
-        components[numComponents++] = RGBFormatDescriptor.ComponentDesc(cast(Component)componentMap[c - 'a']);
+        Component type = cast(Component)componentMap[c - 'a'];
+        if ((format.flags & (1 << type)) != 0)
+            return "Duplicate component types not allowed";
+        format.flags |= 1 << type;
+        components[numComponents++] = RGBFormatDescriptor.ComponentDesc(type);
         str = str[1 .. $];
     }
     if (numComponents == 0)
@@ -246,29 +355,33 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
         if (tail[0] == 'Z')
         {
             // parse swizzle...
-//            assert(false);
-            continue;
+            assert(false);
+//            continue;
         }
 
         // 'BE'
         if (tail == "BE")
         {
-            format.flags |= RGBFormatDescriptor.Flags.BigEndian;
+            format.flags |= Flags.BigEndian;
             continue;
         }
 
         // color space
-        // TODO: work out CTFE problem...
-//        immutable(RGBColorSpace)* standardCs = findRGBColorspace(tail);
-//        if (standardCs)
-//        {
-//            format.colorSpace = standardCs;
-//            continue;
-//        }
+        immutable(RGBColorSpace)* standardCs = findRGBColorspace(tail);
+        if (standardCs)
+        {
+            format.colorSpace = standardCs.id;
+            continue;
+        }
+        // maybe custom color space...
+        // TODO: just validate it, no need to return output
+        RGBColorSpace cs = void;
         size_t taken = tail.parseRGBColorSpace(cs);
         if (taken)
         {
-            format.colorSpace = &cs;
+            if (taken != tail.length)
+                return "Invalid color space";
+            format.colorSpace = tail;
             continue;
         }
 
@@ -280,12 +393,7 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
 
     // if no color space was specified, assume sRGB
     if (!format.colorSpace)
-    {
-        // TODO: work out CTFE problem...
-//        format.colorSpace = findRGBColorspace("sRGB");
-        cs = *findRGBColorspace("sRGB");
-        format.colorSpace = &cs;
-    }
+        format.colorSpace = "sRGB";
 
     // parse format data...
     if (str.length > 0)
@@ -303,10 +411,10 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
             // check if the type is qualified
             switch (str[1])
             {
-                case 's': components[i].format = RGBFormatDescriptor.Format.SignedNormInt;  goto skipTwo;
-                case 'f': components[i].format = RGBFormatDescriptor.Format.FloatingPoint;  goto skipTwo;
-                case 'u': components[i].format = RGBFormatDescriptor.Format.UnsignedInt;    goto skipTwo;
-                case 'i': components[i].format = RGBFormatDescriptor.Format.SignedInt;      goto skipTwo;
+                case 's': components[i].format = Format.SignedNormInt;  goto skipTwo;
+                case 'f': components[i].format = Format.FloatingPoint;  goto skipTwo;
+                case 'u': components[i].format = Format.UnsignedInt;    goto skipTwo;
+                case 'i': components[i].format = Format.SignedInt;      goto skipTwo;
                 skipTwo: str = str[2 .. $]; break;
                 default: str = str[1 .. $]; break;
             }
@@ -323,12 +431,12 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
             if (str.length && str[0] == '.')
             {
                 // validate the format
-                if (components[i].format == RGBFormatDescriptor.Format.NormInt)
-                    components[i].format = RGBFormatDescriptor.Format.FixedPoint;
-                else if (components[i].format == RGBFormatDescriptor.Format.SignedNormInt)
-                    components[i].format = RGBFormatDescriptor.Format.SignedFixedPoint;
-                else
-                    return "Fixed point components may only be unsigned or signed (ie, `4.4` or `s4.4`)";
+                if (components[i].format == Format.NormInt)
+                    components[i].format = Format.FixedPoint;
+                else if (components[i].format == Format.SignedNormInt)
+                    components[i].format = Format.SignedFixedPoint;
+                else if (components[i].format != Format.FloatingPoint)
+                    return "Fractional components may only be unsigned, signed, or floating point (ie, `4.4`, `s4.4` or `f3.7`)";
 
                 // parse the fractional size
                 taken = str[1 .. $].parseInt(components[i].fracBits);
@@ -339,28 +447,70 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
                 components[i].bits += components[i].fracBits;
                 str = str[1 + taken .. $]; // include the '.'
             }
+
+            // if it has a shared exponent, then assert the rules
+            if ((format.flags & (1 << Component.Exponent)) != 0)
+            {
+                if (components[i].format != Format.NormInt)
+                    return "Shared exponent formats may not have qualified component types";
+                components[i].format = components[i].type == Component.Exponent ? Format.Exponent : Format.Mantissa;
+            }
         }
         if (str.length)
             return "Invalid RGB format string";
     }
 
     // prep the detail data...
-    bool allByteAligned = true;
+    bool allAligned = true;
     ubyte sameSize = components[0].bits;
+    bool sameFormat = true;
+    uint numFloating = 0;
     foreach (ref c; components[0 .. numComponents])
     {
-        format.flags |= 1 << c.type;
         format.bits += c.bits;
-        allByteAligned = allByteAligned && (c.bits & 7) == 0;
+        allAligned = allAligned && isAlignedType(c.bits);
         sameSize = c.bits == sameSize ? sameSize : 0;
+        sameFormat = sameFormat && c.format == components[0].format;
+        numFloating += c.format == Format.FloatingPoint ? 1 : 0;
     }
-    format.alignment = allByteAligned && sameSize != 0 && (format.flags & (1 << Component.Exponent)) == 0 ? sameSize : format.bits;
-    if (allByteAligned)
-        format.flags |= RGBFormatDescriptor.Flags.AllByteAligned;
+    if ((format.flags & (1 << Component.Exponent)) != 0)
+    {
+        format.alignment = format.bits;
+        format.flags |= Flags.AnyFloating | Flags.AllFloating;
+    }
+    else
+    {
+        format.alignment = allAligned && sameSize != 0 ? sameSize : format.bits;
+        if (numFloating == numComponents)
+            format.flags |= Flags.AnyFloating | Flags.AllFloating;
+        else if (numFloating > 0)
+            format.flags |= Flags.AnyFloating;
+
+    }
+    if (allAligned)
+        format.flags |= Flags.AllAligned;
     if (sameSize != 0)
-        format.flags |= RGBFormatDescriptor.Flags.AllSameSize;
+        format.flags |= Flags.AllSameSize;
+    if (sameFormat)
+        format.flags |= Flags.AllSameFormat;
+    if ((format.flags & (1 << Component.Luma)) != 0 && (format.flags & 0x7) != 0)
+        return "RGB colors may not have both 'r/g/b' and 'l' channels";
 
     format.components = components[0 .. numComponents];
 
     return null;
+}
+
+
+package:
+
+// TODO: move to util?
+bool isAlignedType(I)(I x)
+{
+    return x >= 8 && (x & (x - 1)) == 0;
+}
+
+bool isSubString(const(char)[] subStr, const(char)[] str) pure nothrow @nogc
+{
+    return &str[0] <= &subStr[0] && &str[$-1] >= &subStr[$-1];
 }

@@ -53,8 +53,10 @@ struct xyY
 XYZType parseXYZ(XYZType)(const(char)[] str) @safe pure
     if (is(XYZType == XYZ) || is(XYZType == xyY))
 {
+    import std.exception : enforce;
+
     XYZType r;
-    assert(str.parseXYZ(r) > 0, "Invalid " ~ XYZType.stringof ~ " color string: " ~ str); // TODO: enforce instead of assert
+    enforce(str.parseXYZ(r) > 0, "Invalid " ~ XYZType.stringof ~ " color string: " ~ str);
     return r;
 }
 
