@@ -2,11 +2,20 @@ module wg.image.format;
 
 template formatForPixelType(T)
 {
-    // TODO: real pixel formats would have special string conversions
+    import wg.color.rgb;
 
-    // ie: struct { ubyte r, g, b, a; }
-    //  -> "RGBA_8_8_8_8"
+    static if (is(T == RGB!Fmt, string Fmt))
+    {
+        enum formatForPixelType = makeFormatString(T.Format);
+    }
+    else
+    {
+        // TODO: real pixel formats would have special string conversions
 
-    // HACK
-    enum formatForPixelType = T.stringof;
+        // ie: struct { ubyte r, g, b, a; }
+        //  -> "RGBA_8_8_8_8"
+
+        // HACK
+        enum formatForPixelType = T.stringof;
+    }
 }

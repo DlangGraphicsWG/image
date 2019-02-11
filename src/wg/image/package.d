@@ -21,7 +21,7 @@ struct Image(ElementType)
 
     this(ref ImageBuffer image)
     {
-        assert(image.pixelFormat.asDString == formatForPixelType!ElementType);
+        assert(image.pixelFormat.asDString[] == formatForPixelType!ElementType[]);
         assert(image.blockWidth == 1 && image.blockHeight == 1 && image.bitsPerBlock / 8 == ElementType.sizeof);
         img = image;
     }
@@ -37,7 +37,7 @@ struct Image(ElementType)
     }
 
 package:
-    ImageBuffer img = ImageBuffer(0, 0, 0, 1, 1, ElementType.sizeof * 8, 0, null, formatForPixelType!ElementType, null);
+    ImageBuffer img = ImageBuffer(0, 0, 0, 1, 1, ElementType.sizeof * 8, 0, null, formatForPixelType!ElementType.ptr, null);
 
     // internal functions can modify data
     ref ImageBuffer buffer() { return img; }
