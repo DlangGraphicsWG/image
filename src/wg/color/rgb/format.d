@@ -182,9 +182,9 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 unittest
 {
     import wg.util.allocator;
-    Allocator gcAlloc = getGcAllocator();
+    Allocator* gcAlloc = getGcAllocator();
 
-    RGBFormatDescriptor* format = parseRGBFormat("bgra_10_10_10_2_Rec.2020@D50^1.7_BE_#userdata", &gcAlloc);
+    RGBFormatDescriptor* format = parseRGBFormat("bgra_10_10_10_2_Rec.2020@D50^1.7_BE_#userdata", gcAlloc);
     assert(format.bits == 32);
     assert(format.alignment == 32);
     assert(format.components.length == 4);

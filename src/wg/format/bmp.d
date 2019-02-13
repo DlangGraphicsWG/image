@@ -2,6 +2,104 @@ module wg.format.bmp;
 
 import wg.image.imagebuffer;
 import wg.image.metadata;
+import wg.util.allocator;
+
+
+/**
+* Format an image into a BMP image buffer.
+*/
+void[] writeBMP(ref const(ImageBuffer) image)
+{
+    return writeBMP(image, getGcAllocator());
+}
+
+/**
+ * Format an image into a BMP image buffer.
+ */
+void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nogc
+{
+    import wg.color.rgb.format : RGBFormatDescriptor, parseRGBFormat;
+
+    if (image.blockWidth != 1 || image.blockHeight != 1 ||
+        (image.bitsPerBlock != 16 && image.bitsPerBlock != 24 && image.bitsPerBlock != 32))
+    {
+        // we need to transcode this image...
+        return null;
+    }
+
+    // we appear to have a valid image...
+    RGBFormatDescriptor* format = parseRGBFormat(image.pixelFormat.asDString, allocator);
+    scope(exit) allocator.deallocate(format);
+
+    // determine the components are formatted okay
+    uint red, green, blue, alpha;
+    uint bit = 0;
+    foreach (ref component; format.components) with (RGBFormatDescriptor)
+    {
+        // need to transcode the image!
+        if (component.format != Format.NormInt)
+            return null;
+
+        switch (component.type)
+        {
+            case Component.Red:     red     = ((1 << component.bits) - 1) << bit; break;
+            case Component.Green:   green   = ((1 << component.bits) - 1) << bit; break;
+            case Component.Blue:    blue    = ((1 << component.bits) - 1) << bit; break;
+            case Component.Alpha:   alpha   = ((1 << component.bits) - 1) << bit; break;
+            case Component.Unused:  break;
+            default:
+                // need to transcode the image!
+                return null;
+        }
+        bit += component.bits;
+    }
+
+    uint bytesPerPixel = image.bitsPerBlock / 8;
+    uint bmpPitch = (image.width*bytesPerPixel + 3) & ~3;
+
+    uint headerSize = BMPFileHeader.sizeof + BMPInfoV4.sizeof;
+    uint imageSize = bmpPitch * image.height;
+    uint fileSize = headerSize + imageSize;
+
+    void[] bmp = allocator.allocate(fileSize);
+
+    BMPFileHeader* header = cast(BMPFileHeader*)bmp.ptr;
+    BMPInfoV4* info = cast(BMPInfoV4*)(header + 1);
+    void* data = cast(void*)(info + 1);
+
+    *header = BMPFileHeader.init;
+    header.size = cast(uint)fileSize;
+    header.offBits = cast(uint)headerSize;
+
+    *info = BMPInfoV4.init;
+    info.size = BMPInfoV4.sizeof;
+    info.width = image.width;
+    info.height = -cast(int)image.height;
+    info.bitCount = image.bitsPerBlock;
+    info.compression = Compression.BI_BITFIELDS;
+    info.sizeImage = imageSize;
+//    info.xPelsPerMeter = ...; // TODO: lookup metadata
+//    info.yPelsPerMeter = ...;
+    info.redMask = red;
+    info.greenMask = green;
+    info.blueMask = blue;
+    info.alphaMask = alpha;
+
+    // TODO: emit proper cs info
+    info.csType = LogicalColorSpace.LCS_WINDOWS_COLOR_SPACE; // LCS_sRGB?
+
+    // write image data
+    const(void)* src = image.data;
+    uint rowBytes = bytesPerPixel * image.width;
+    foreach (h; 0 .. image.height)
+    {
+        data[0 .. rowBytes] = src[0 .. rowBytes];
+        src += image.rowPitch;
+        data += bmpPitch;
+    }
+
+    return bmp;
+}
 
 
 struct BMPImage
@@ -33,20 +131,25 @@ struct BMPImage
         return cast(BMPFileHeader*)&data[0];
     }
 
-    int bmpVersion() const
+    int bmpVersion(const(ubyte)** palette = null) const
     {
         if (*cast(ushort*)&data[0] == 0)
             return 1;
-        const(uint) size = *cast(const(uint)*)(header() + 1);
+        const(ubyte)* info = cast(const(ubyte)*)(header() + 1);
+        uint size = *cast(const(uint)*)info;
         switch (size)
         {
             case BMPInfoV2.sizeof:
+                if (palette) *palette = info + BMPInfoV2.sizeof;
                 return 2;
             case BMPInfoV3.sizeof:
+                if (palette) *palette = info + BMPInfoV3.sizeof;
                 return 3;
             case BMPInfoV4.sizeof:
+                if (palette) *palette = info + BMPInfoV4.sizeof;
                 return 4;
             case BMPInfoV5.sizeof:
+                if (palette) *palette = info + BMPInfoV5.sizeof;
                 return 5;
             default:
                 return 0;
@@ -81,11 +184,14 @@ struct BMPImage
         uint width, height;
         uint pitch;
         ubyte bits;
+        Compression compression = Compression.BI_RGB;
+        int paletteLength = 0;
         bool topDown = false;
 
         // TODO: no paletted images...
 
-        int bmpVer = bmpVersion();
+        const(ubyte)* paletteData;
+        int bmpVer = bmpVersion(&paletteData);
         final switch(bmpVer)
         {
             case 1:
@@ -139,7 +245,21 @@ struct BMPImage
 
                 pitch = (((bits * width) / 8) + 3) & ~3;
 
-                assert(info.clrUsed == 0);
+                paletteLength = info.clrUsed;
+
+                switch (info.compression)
+                {
+                    case Compression.BI_RLE8:
+                    case Compression.BI_RLE4:
+                    case Compression.BI_JPEG:
+                    case Compression.BI_PNG:
+                    case Compression.BI_CMYKRLE8:
+                    case Compression.BI_CMYKRLE4:
+                        compression = info.compression;
+                        break;
+                    default:
+                        break;
+                }
 
                 // parse component format from the component masks
                 if (info.compression == Compression.BI_BITFIELDS || info.compression == Compression.BI_ALPHABITFIELDS)
@@ -157,22 +277,22 @@ struct BMPImage
                     {
                         uint currentMask;
                         uint startBit = bit;
-                        if ((1 << bit) & i4.redMask)
+                        if ((1u << bit) & i4.redMask)
                         {
                             currentMask = i4.redMask;
                             format ~= 'r';
                         }
-                        else if ((1 << bit) & i4.greenMask)
+                        else if ((1u << bit) & i4.greenMask)
                         {
                             currentMask = i4.greenMask;
                             format ~= 'g';
                         }
-                        else if ((1 << bit) & i4.blueMask)
+                        else if ((1u << bit) & i4.blueMask)
                         {
                             currentMask = i4.blueMask;
                             format ~= 'b';
                         }
-                        else if ((1 << bit) & alphaMask)
+                        else if ((1u << bit) & alphaMask)
                         {
                             currentMask = alphaMask;
                             format ~= 'a';
@@ -182,7 +302,8 @@ struct BMPImage
                             currentMask = unusedMask;
                             format ~= 'x';
                         }
-                        while ((1 << ++bit) & currentMask) {}
+                        while ((1u << ++bit) & currentMask) {}
+                        assert(bit == bits || (~((1u << bit) - 1) & currentMask) == 0, "Invalid bitfields: Mask bits must be contiguous");
                         componentWidth[numComponents++] = bit - startBit;
                     }
 
@@ -195,6 +316,7 @@ struct BMPImage
                         for (uint i = 0; i < numComponents; ++i)
                             format ~= '_' ~ formatInt(componentWidth[i]);
                     }
+                    format ~= '\0';
                 }
 
                 md.horizDpi = info.xPelsPerMeter / 39.37007874;
@@ -210,7 +332,52 @@ struct BMPImage
             case 32: format = "bgrx";         break;
             default:
                 // 0, 1, 2, 4, 8
-                assert(0);
+                format = bmpVer < 3 ? "bgr" : "bgrx";
+                break;
+        }
+
+        inout(ubyte)* imageData = cast(inout(ubyte)*)data.ptr + (bmpVer == 1 ? 10 : header().offBits);
+
+        if (bits <= 8)
+        {
+            // palette expansion...
+            if (paletteLength == 0)
+                paletteLength = 1 << bits;
+
+            ubyte unpackBits = bmpVer < 3 ? 24 : 32;
+            ubyte unpackBytes = unpackBits / 8;
+            uint unpackPitch = (((unpackBits * width) / 8) + 3) & ~3;
+
+            ubyte[] raw = new ubyte[unpackPitch * height];
+
+            imageData = topDown ? imageData : imageData + (height - 1)*pitch;
+            ubyte* destLine = raw.ptr;
+            foreach (y; 0 .. height)
+            {
+                for (size_t x = 0, bit = 0; x < width*unpackBytes; x += unpackBytes, bit += bits)
+                {
+                    size_t byteOffset = bit / 8;
+                    size_t index = (imageData[byteOffset] >> ((8 - bits) - (bit % 8))) & ((1 << bits) - 1);
+                    if (index >= paletteLength)
+                        destLine[x .. x + unpackBytes] = 0; // out of palette; assign black
+                    else
+                        destLine[x .. x + unpackBytes] = paletteData[index * unpackBytes .. index * unpackBytes + unpackBytes];
+                }
+                if (topDown)
+                    imageData += pitch;
+                else
+                    imageData -= pitch;
+                destLine += unpackPitch;
+            }
+
+            bits = unpackBits;
+            pitch = unpackPitch;
+            imageData = cast(inout(ubyte)*)raw.ptr;
+        }
+        else if (compression != Compression.BI_RGB)
+        {
+            // decoding...
+            assert(false);
         }
 
         return inout(ImageBuffer)(
@@ -219,13 +386,12 @@ struct BMPImage
             1, 1,
             bits,
             0,
-            data.ptr + header().offBits,
+            imageData,
             format.ptr,
             null
         );
     }
 }
-
 
 unittest
 {
@@ -233,13 +399,16 @@ unittest
     import wg.image;
     import wg.color.rgb;
 
-    void[] file = read("rgba16-4444.bmp");
+    void[] file = read("pal8.bmp");
 
     auto bmp = BMPImage(file);
     ImageBuffer buf = bmp.getImage();
 
-    auto img = Image!(RGB!"bgr")(buf);
+    const img = Image!(RGB!"bgrx")(buf);
     auto pix = img.at(0, 0);
+
+    void[] output = writeBMP(img.buffer());
+    write("output.bmp", output);
 }
 
 
@@ -309,7 +478,7 @@ struct XYZTriple
 struct BMPFileHeader
 {
     align(2):
-    char[2] type; // "BM"
+    char[2] type = "BM";
     uint    size; // file size
     ushort  reserved1;
     ushort  reserved2;
@@ -339,10 +508,10 @@ struct BMPInfoV2
 struct BMPInfoV3
 {
     align(2):
-    uint        size;
+    uint        size = BMPInfoV3.sizeof;
     int         width;
     int         height;
-    ushort      planes;
+    ushort      planes = 1;
     ushort      bitCount;
     Compression compression;
     uint        sizeImage;
