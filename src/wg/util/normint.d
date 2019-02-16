@@ -10,8 +10,8 @@ Source:     $(PHOBOSSRC std/experimental/_normint.d)
 */
 module wg.util.normint;
 
-import std.traits : isIntegral, isSigned, isUnsigned, isFloatingPoint, Unsigned;
-static import std.algorithm;
+import wg.util.traits : isSigned, isFloatingPoint;
+import std.traits : isIntegral, isUnsigned, Unsigned;
 
 @safe pure nothrow @nogc:
 
@@ -83,9 +83,9 @@ pure nothrow @nogc:
     NormalizedInt!I opBinary(string op)(NormalizedInt!I rh) const if (op == "+" || op == "-")
     {
         auto r = mixin("cast(WorkInt!I)value " ~ op ~ " rh.value");
-        r = std.algorithm.min(r, max);
+        r = _min(r, max);
         static if (op == "-")
-            r = std.algorithm.max(r, min);
+            r = _max(r, min);
         return NormalizedInt!I(cast(I)r);
     }
 
@@ -113,8 +113,8 @@ pure nothrow @nogc:
             double b = rh.value;
             static if (isSigned!I)
             {
-                a = std.algorithm.max(a, cast(double)min);
-                b = std.algorithm.max(b, cast(double)min);
+                a = _max(a, cast(double)min);
+                b = _max(b, cast(double)min);
             }
             double r = a * b * (1.0/max);
             return NormalizedInt!I(cast(I)r);
@@ -126,8 +126,8 @@ pure nothrow @nogc:
             double b = rh.value * (1.0/max);
             static if (isSigned!I)
             {
-                a = std.algorithm.max(a, -1.0);
-                b = std.algorithm.max(b, -1.0);
+                a = _max(a, -1.0);
+                b = _max(b, -1.0);
             }
             double r = a^^b * double(max);
             if (isUnsigned!I || r >= 0)
@@ -146,7 +146,7 @@ pure nothrow @nogc:
     /** Binary operators. */
     NormalizedInt!I opBinary(string op, T)(T rh) const if (isNormalizedIntegralType!T && op == "*")
     {
-        return NormalizedInt!I(cast(I)std.algorithm.clamp(cast(WorkInt!I)value * rh, min, max));
+        return NormalizedInt!I(cast(I)_clamp(cast(WorkInt!I)value * rh, min, max));
     }
 
     /** Binary operators. */
@@ -884,3 +884,9 @@ unittest
     static assert(cast(NormalizedInt!short)NormalizedInt!byte(-127) == -32767);
     static assert(cast(NormalizedInt!byte)NormalizedInt!short(-32767) == -127);
 }
+
+
+// the phobos implementations are literally insane!!
+T _min(T)(T a, T b) { return a < b ? a : b; }
+T _max(T)(T a, T b) { return a > b ? a : b; }
+T _clamp(T)(T v, T min, T max) { return v < min ? min : v > max ? max : v; }
