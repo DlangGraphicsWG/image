@@ -104,3 +104,38 @@ size_t parseXYZ(XYZType)(const(char)[] str, out XYZType color) @trusted pure not
         return 0;
     return s.ptr + 1 - str.ptr;
 }
+
+/**
+* Get the format string for an XYZ or xyY color type.
+*/
+template FormatString(T) if (is(T == XYZ) || is(T == xyY))
+{
+    static if (is(T == XYZ))
+        enum FormatString = "XYZ";
+    else
+        enum FormatString = "xyY";
+}
+
+
+package:
+
+void registerXYZ()
+{
+    import wg.image.format : registerImageFormatFamily;
+    import wg.image.imagebuffer : ImageBuffer;
+
+    static bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe
+    {
+        if (format[] != "XYZ" && format[] != "xyY")
+            return false;
+
+        image.width = width;
+        image.height = height;
+        image.bitsPerBlock = XYZ.sizeof * 8;
+        image.rowPitch = cast(uint)(width * XYZ.sizeof);
+
+        return true;
+    }
+
+    registerImageFormatFamily("xyz", &getImageParams);
+}

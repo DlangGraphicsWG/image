@@ -290,7 +290,7 @@ unittest
 }
 
 
-private:
+package:
 
 string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGBFormatDescriptor.ComponentDesc[6] components) @trusted pure nothrow @nogc
 {
@@ -500,9 +500,6 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
 
     return null;
 }
-
-
-package:
 
 // TODO: move to util?
 bool isAlignedType(I)(I x)

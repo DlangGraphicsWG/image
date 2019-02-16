@@ -10,6 +10,7 @@ module wg.color.rgb.colorspace;
 import wg.color.standard_illuminant;
 import wg.color.xyz : xyY;
 
+import wg.util.allocator;
 import wg.util.format : formatReal;
 import wg.util.parse : parseReal;
 import wg.util.traits : isFloatingPoint;
@@ -223,7 +224,39 @@ RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
     return r;
 }
 
-// TODO: @nogc version
+/**
+ * Parse RGB color space from string.
+ */
+RGBColorSpace* parseRGBColorSpace(const(char)[] str, Allocator* allocator) @trusted nothrow @nogc
+{
+    RGBColorSpace r;
+    if (str.parseRGBColorSpace(r) == 0)
+        return null;
+
+    bool allocId = r.id == str;
+    bool allocGamma = r.gamma.isSubString(str);
+
+    void[] alloc = allocator.allocate(RGBColorSpace.sizeof + (allocId ? r.id.length + 1 : 0) + (allocGamma ? r.gamma.length + 1 : 0));
+
+    RGBColorSpace* cs = cast(RGBColorSpace*)alloc.ptr;
+    *cs = r;
+
+    char* tail = cast(char*)(cs + 1);
+    if (allocId)
+    {
+        cs.id = tail[0 .. r.id.length];
+        tail[0 .. r.id.length] = r.id[];
+        tail[r.id.length] = '\0';
+        tail += r.id.length + 1;
+    }
+    if (allocGamma)
+    {
+        cs.gamma = tail[0 .. r.gamma.length];
+        tail[0 .. r.gamma.length] = r.gamma[];
+        tail[r.gamma.length] = '\0';
+    }
+    return cs;
+}
 
 /**
  * Parse white point from string.
