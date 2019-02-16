@@ -1,4 +1,4 @@
-module wg.color.color;
+module wg.color;
 
 import wg.color.rgb;
 
@@ -166,4 +166,16 @@ enum Colors
     whiteSmoke           = RGB8(245,245,245), /// <font color=whiteSmoke>&#x25FC;</font>
     yellow               = RGB8(255,255,0),   /// <font color=yellow>&#x25FC;</font>
     yellowGreen          = RGB8(154,205,50)   /// <font color=yellowGreen>&#x25FC;</font>
+}
+
+
+private:
+
+shared static this()
+{
+    import wg.color.rgb : registerRGB;
+    import wg.color.xyz : registerXYZ;
+
+    registerXYZ();
+    registerRGB();
 }

@@ -119,6 +119,14 @@ unittest
     static assert(is(typeof(pixel2.a) == float));
 }
 
+/**
+ * Get the canonical format string for an RGB type.
+ */
+template FormatString(T) if (is(T == RGB!fmt, string fmt))
+{
+    enum FormatString = makeFormatString(T.Format);
+}
+
 
 private:
 
@@ -228,4 +236,35 @@ string componentExpression(string expression, char component, string op = null)
             buffer[o++] = expression[i];
     }
     return "static if (hasComponent!'" ~ component ~ "')\n\t" ~ buffer[0 .. o].idup;
+}
+
+
+package(wg.color):
+
+void registerRGB()
+{
+    import wg.image.format : registerImageFormatFamily;
+    import wg.image.imagebuffer : ImageBuffer;
+
+    static bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe
+    {
+        import wg.color.rgb.format;
+
+        RGBFormatDescriptor desc;
+        RGBFormatDescriptor.ComponentDesc[6] components;
+
+        string error = parseRGBFormat(format, desc, components);
+
+        if (error)
+            return false;
+
+        image.width = width;
+        image.height = height;
+        image.bitsPerBlock = desc.bits;
+        image.rowPitch = (width*desc.bits + 7) / 8;
+
+        return true;
+    }
+
+    registerImageFormatFamily("rgb", &getImageParams);
 }

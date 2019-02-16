@@ -28,7 +28,7 @@ struct Allocator
 }
 
 /**
- * make an `Allocator` from an object that conforms to the `std.experimental.allocator` interface
+ * Make an `Allocator` from an object that conforms to the `std.experimental.allocator` interface
  */
 Allocator makeAllocator(Alloc)(shared(Alloc) instance = null) if (isReferenceType!Alloc)
 {
@@ -49,12 +49,36 @@ Allocator makeAllocator(Alloc)(shared(Alloc) instance = null) if (isReferenceTyp
     return Allocator(&alloc, &free, instance);
 }
 
+/**
+ * Get an allocator that uses the C malloc()/free() functions.
+ */
+Allocator* getMallocAllocator()
+{
+    import core.stdc.stdlib : malloc, free;
+
+    static void* memAlloc(size_t bytes, size_t* allocated, shared void*) @nogc nothrow
+    {
+        void* mem = malloc(bytes);
+        if (allocated)
+            *allocated = bytes;
+        return mem;
+    }
+    static void memFree(void* alloc, size_t, shared void*) @nogc nothrow
+    {
+        free(alloc);
+    }
+
+    __gshared Allocator instance = Allocator(&memAlloc, &memFree, null);
+
+    return &instance;
+}
+
 
 package(wg):
 
 // this is a hack, strictly for internal use, which returns a GC allocator in a `@nogc` container
 // it can be used by GC allocating overloads to call through to `@nogc` implementation functions
-Allocator getGcAllocator()
+Allocator* getGcAllocator()
 {
     static void* gcAlloc(size_t bytes, size_t* allocated, shared void* userData) nothrow @trusted
     {
@@ -64,7 +88,7 @@ Allocator getGcAllocator()
         return mem.ptr;
     }
 
-    return Allocator(cast(Allocator.AllocFunc)&gcAlloc,
-                     (void*, size_t, shared void*) {},
-                     null);
+    __gshared Allocator instance = Allocator(cast(Allocator.AllocFunc)&gcAlloc, (void*, size_t, shared void*) {}, null);
+
+    return &instance;
 }

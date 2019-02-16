@@ -1,21 +1,63 @@
 module wg.image.format;
 
-template formatForPixelType(T)
+import wg.image.imagebuffer;
+
+alias GetImageParams = bool function(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe;
+
+void registerImageFormatFamily(string family, GetImageParams getImageParams)
 {
-    import wg.color.rgb;
-
-    static if (is(T == RGB!Fmt, string Fmt))
-    {
-        enum formatForPixelType = makeFormatString(T.Format);
-    }
-    else
-    {
-        // TODO: real pixel formats would have special string conversions
-
-        // ie: struct { ubyte r, g, b, a; }
-        //  -> "RGBA_8_8_8_8"
-
-        // HACK
-        enum formatForPixelType = T.stringof;
-    }
+    FormatFamily* formatFamily = new FormatFamily;
+    formatFamily.family = family;
+    formatFamily.getImageParams = getImageParams;
+    formatFamily.next = imageFormats;
+    imageFormats = formatFamily;
 }
+
+string getFormatFamily(const(char)[] format) nothrow @nogc @trusted
+{
+    FormatFamily* f = imageFormats;
+    ImageBuffer image;
+    while (f)
+    {
+        if (f.getImageParams(format, 16, 16, image))
+            return f.family;
+        f = f.next;
+    }
+    return null;
+}
+
+bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @trusted
+{
+    FormatFamily* f = imageFormats;
+    while (f)
+    {
+        if (f.getImageParams(format, width, height, image))
+            return true;
+        f = f.next;
+    }
+    return false;
+}
+
+
+template FormatForPixelType(T)
+{
+    // this hack emulates ADL
+    import std.traits : moduleName;
+    mixin("import " ~ moduleName!T ~ ";");
+    mixin("alias M = " ~ moduleName!T ~ ";");
+
+    // expect a template called `getFormatString` beside every colour type
+    enum FormatForPixelType = M.FormatString!T;
+}
+
+
+private:
+
+struct FormatFamily
+{
+    FormatFamily* next;
+    string family;
+    GetImageParams getImageParams;
+}
+
+__gshared FormatFamily* imageFormats;
