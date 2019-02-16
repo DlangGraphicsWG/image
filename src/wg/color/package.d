@@ -231,6 +231,74 @@ unittest
     assert(RGB8(0xFF, 0x80, 0x10).convertColor!RGBA8() == RGBA8(0xFF, 0x80, 0x10, 0x00));
 }
 
+/**
+ * Create a color from a string.
+ * Params: str = A string representation of a _color.$(BR)
+ * May be a hex _color in the standard forms: (#/$)rgb/argb/rrggbb/aarrggbb$(BR)
+ * May also be the name of any _color from the $(D_INLINECODE Colors) enum.
+ * Returns: The _color expressed by the string.
+ * Throws: Throws $(D_INLINECODE std.conv.ConvException) if the string is invalid.
+ */
+Color colorFromString(Color = RGBA8)(scope const(char)[] str) pure @safe
+{
+    import std.conv : ConvException;
+
+    RGBA8 r;
+    string error = colorFromStringImpl(str, r);
+    if (error)
+        throw new ConvException(error);
+    return r;
+//    return cast(Color)r;
+}
+
+///
+unittest
+{
+    // common hex formats supported:
+
+    // 3 digits
+    assert(colorFromString("F80") == RGB8(0xFF, 0x88, 0x00));
+    assert(colorFromString("#F80") == RGB8(0xFF, 0x88, 0x00));
+    assert(colorFromString("$F80") == RGB8(0xFF, 0x88, 0x00));
+
+    // 6 digits
+    assert(colorFromString("FF8000") == RGB8(0xFF, 0x80, 0x00));
+    assert(colorFromString("#FF8000") == RGB8(0xFF, 0x80, 0x00));
+    assert(colorFromString("$FF8000") == RGB8(0xFF, 0x80, 0x00));
+
+    // 4/8 digita (/w alpha)
+    assert(colorFromString!RGBA8("#8C41") == RGBA8(0xCC, 0x44, 0x11, 0x88));
+    assert(colorFromString!RGBA8("#80CC4401") == RGBA8(0xCC, 0x44, 0x01, 0x80));
+
+    // named colors (case-insensitive)
+    assert(colorFromString("red") == RGB8(0xFF, 0x0, 0x0));
+    assert(colorFromString("WHITE") == RGB8(0xFF, 0xFF, 0xFF));
+    assert(colorFromString("LightGoldenrodYellow") == RGB8(250,250,210));
+
+    // parse failure
+    RGB8 c;
+    assert(colorFromString("Ultraviolet", c) == false);
+}
+
+/**
+ * Create a color from a string.
+ * This version of the function is $(D_INLINECODE nothrow), $(D_INLINECODE @nogc).
+ * Params: str = A string representation of a _color.$(BR)
+ * May be a hex _color in the standard forms: (#/$)rgb/argb/rrggbb/aarrggbb$(BR)
+ * May also be the name of any _color from the $(D_INLINECODE Colors) enum.
+ * color = Receives the _color expressed by the string.
+ * Returns: $(D_INLINECODE true) if a _color was successfully parsed from the string, $(D_INLINECODE false) otherwise.
+ */
+bool colorFromString(Color = RGBA8)(scope const(char)[] str, out Color color) pure nothrow @safe @nogc
+{
+    RGBA8 r;
+    if (colorFromStringImpl(str, r) != null)
+        return false;
+    color = r;
+//    color = cast(Color)r;
+    return true;
+}
+
 private:
 
 import std.traits : TemplateOf, isInstanceOf;
@@ -303,6 +371,97 @@ unittest
 
     // test attributes
     static assert(is(ConversionPath!(shared RGBA8, immutable xyY) == AliasSeq!(XYZ, xyY)));
+}
+
+string colorFromStringImpl(scope const(char)[] str, out RGBA8 color) pure nothrow @safe @nogc
+{
+    static const(char)[] getHex(return const(char)[] hex) pure nothrow @nogc @safe
+    {
+        if (hex.length > 0 && (hex[0] == '#' || hex[0] == '$'))
+            hex = hex[1..$];
+        foreach (i; 0 .. hex.length)
+        {
+            if (!(hex[i] >= '0' && hex[i] <= '9' || hex[i] >= 'a' && hex[i] <= 'f' || hex[i] >= 'A' && hex[i] <= 'F'))
+                return null;
+        }
+        return hex;
+    }
+
+    const(char)[] hex = getHex(str);
+    if (hex)
+    {
+        static ubyte val(char c) pure nothrow @nogc @safe
+        {
+            if (c >= '0' && c <= '9')
+                return cast(ubyte)(c - '0');
+            else if (c >= 'a' && c <= 'f')
+                return cast(ubyte)(c - 'a' + 10);
+            else
+                return cast(ubyte)(c - 'A' + 10);
+        }
+
+        if (hex.length == 3)
+        {
+            ubyte r = val(hex[0]);
+            ubyte g = val(hex[1]);
+            ubyte b = val(hex[2]);
+            color = RGBA8(cast(ubyte)(r | (r << 4)), cast(ubyte)(g | (g << 4)), cast(ubyte)(b | (b << 4)), 0);
+        }
+        else if (hex.length == 4)
+        {
+            ubyte a = val(hex[0]);
+            ubyte r = val(hex[1]);
+            ubyte g = val(hex[2]);
+            ubyte b = val(hex[3]);
+            color = RGBA8(cast(ubyte)(r | (r << 4)), cast(ubyte)(g | (g << 4)), cast(ubyte)(b | (b << 4)), cast(ubyte)(a | (a << 4)));
+        }
+        else if (hex.length == 6)
+        {
+            ubyte r = cast(ubyte)(val(hex[0]) << 4) | val(hex[1]);
+            ubyte g = cast(ubyte)(val(hex[2]) << 4) | val(hex[3]);
+            ubyte b = cast(ubyte)(val(hex[4]) << 4) | val(hex[5]);
+            color = RGBA8(r, g, b, 0);
+        }
+        else if (hex.length == 8)
+        {
+            ubyte a = cast(ubyte)(val(hex[0]) << 4) | val(hex[1]);
+            ubyte r = cast(ubyte)(val(hex[2]) << 4) | val(hex[3]);
+            ubyte g = cast(ubyte)(val(hex[4]) << 4) | val(hex[5]);
+            ubyte b = cast(ubyte)(val(hex[6]) << 4) | val(hex[7]);
+            color = RGBA8(r, g, b, a);
+        }
+        else
+            return "Invalid length for hex color";
+        return null;
+    }
+
+    // need to write a string compare, since phobos is not nothrow @nogc, etc...
+    static bool streqi(scope const(char)[] a, scope const(char)[] b)
+    {
+        if (a.length != b.length)
+            return false;
+        foreach(i; 0 .. a.length)
+        {
+            auto c1 = (a[i] >= 'A' && a[i] <= 'Z') ? a[i] | 0x20 : a[i];
+            auto c2 = (b[i] >= 'A' && b[i] <= 'Z') ? b[i] | 0x20 : b[i];
+            if(c1 != c2)
+                return false;
+        }
+        return true;
+    }
+
+    static foreach (k; __traits(allMembers, Colors))
+    {
+        if (streqi(str, k))
+        {
+//            mixin("return cast(RGBA8)Colors." ~ k ~ ";");
+            mixin("enum Col = Colors." ~ k ~ ";");
+            color = RGBA8(Col.r, Col.g, Col.b, 0xFF);
+            return null;
+        }
+    }
+
+    return "String is not a valid color";
 }
 
 shared static this()
