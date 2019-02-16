@@ -6,8 +6,8 @@ import wg.util.allocator;
 
 
 /**
-* Format an image into a BMP image buffer.
-*/
+ * Format an image into a BMP image buffer.
+ */
 void[] writeBMP(ref const(ImageBuffer) image)
 {
     return writeBMP(image, getGcAllocator());
@@ -78,15 +78,50 @@ void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nog
     info.bitCount = image.bitsPerBlock;
     info.compression = Compression.BI_BITFIELDS;
     info.sizeImage = imageSize;
-//    info.xPelsPerMeter = ...; // TODO: lookup metadata
-//    info.yPelsPerMeter = ...;
     info.redMask = red;
     info.greenMask = green;
     info.blueMask = blue;
     info.alphaMask = alpha;
 
-    // TODO: emit proper cs info
-    info.csType = LogicalColorSpace.LCS_WINDOWS_COLOR_SPACE; // LCS_sRGB?
+    const(CommonMetadata)* md = image.getMetadata!CommonMetadata();
+    if (md)
+    {
+        float[2] dpi = md.getDPI();
+        info.xPelsPerMeter = cast(int)(dpi[0] * 39.37007874);
+        info.yPelsPerMeter = cast(int)(dpi[1] * 39.37007874);
+    }
+
+    if (format.colorSpace[0 .. 4] == "sRGB")
+        info.csType = LogicalColorSpace.LCS_sRGB;
+    else
+        info.csType = LogicalColorSpace.LCS_WINDOWS_COLOR_SPACE;
+    // TODO: convert xyY to XYZ...
+//    else
+//        info.csType = LogicalColorSpace.LCS_CALIBRATED_RGB;
+
+    if (format.colorSpace != "sRGB")
+    {
+        import wg.color.rgb.colorspace;
+
+        // decode color space
+        RGBColorSpace* cs = parseRGBColorSpace(format.colorSpace, allocator);
+        scope(exit) allocator.deallocate(cs);
+
+        // specify gamma
+        float gamma;
+        if (cs.gamma.parseReal(gamma) > 0)
+        {
+            info.gammaRed = FP16Dot16(cast(uint)(gamma * 0x10000));
+            info.gammaGreen = info.gammaRed;
+            info.gammaBlue = info.gammaRed;
+        }
+
+        // TODO: convert xyY to XYZ...
+        // specify primaries
+//        info.endpoints.red = ;
+//        info.endpoints.green = ;
+//        info.endpoints.blue = ;
+    }
 
     // write image data
     const(void)* src = image.data;
@@ -174,7 +209,7 @@ struct BMPImage
 
     inout(ImageBuffer) getImage() inout
     {
-        import wg.util.format : formatInt;
+        import wg.util.format : formatInt, formatReal;
 
         ImageBuffer img;
         CommonMetadata md;
@@ -224,6 +259,34 @@ struct BMPImage
                 const(BMPInfoV4)* info = infoHeader!BMPInfoV4();
 
                 // check csType...
+                switch (info.csType)
+                {
+                    case LogicalColorSpace.LCS_CALIBRATED_RGB:
+                        if (info.gammaGreen != info.gammaRed || info.gammaGreen != info.gammaBlue)
+                        {
+                            // TODO: what if gamma's are different?
+                            // should transform red and blue to match green gamma...
+                            assert(0);
+                        }
+                        float gamma = info.gammaGreen / float(0x10000);
+                        cs ~= '^' ~ gamma.formatReal(2);
+
+                        // TODO: parse the primaries!!
+                        break;
+                    case LogicalColorSpace.PROFILE_LINKED:
+                        const(char)[] icc = cast(const(char)[])iccData();
+                        // TODO: what to do with this icc filename??
+                        break;
+                    case LogicalColorSpace.PROFILE_EMBEDDED:
+                        const(void)[] icc = iccData();
+                        // TODO: what to do with this data block??
+                        break;
+                    case LogicalColorSpace.LCS_sRGB:
+                    case LogicalColorSpace.LCS_WINDOWS_COLOR_SPACE:
+                        break;
+                    default:
+                        assert(0);
+                }
 
                 goto case 3;
             case 3:
@@ -350,34 +413,139 @@ struct BMPImage
 
             ubyte[] raw = new ubyte[unpackPitch * height];
 
-            imageData = topDown ? imageData : imageData + (height - 1)*pitch;
-            ubyte* destLine = raw.ptr;
-            foreach (y; 0 .. height)
+            if (compression == Compression.BI_RGB)
             {
-                for (size_t x = 0, bit = 0; x < width*unpackBytes; x += unpackBytes, bit += bits)
+                imageData = topDown ? imageData : imageData + (height - 1)*pitch;
+                ubyte* destLine = raw.ptr;
+                foreach (y; 0 .. height)
                 {
-                    size_t byteOffset = bit / 8;
-                    size_t index = (imageData[byteOffset] >> ((8 - bits) - (bit % 8))) & ((1 << bits) - 1);
-                    if (index >= paletteLength)
-                        destLine[x .. x + unpackBytes] = 0; // out of palette; assign black
+                    for (size_t x = 0, bit = 0; x < width*unpackBytes; x += unpackBytes, bit += bits)
+                    {
+                        size_t byteOffset = bit / 8;
+                        size_t index = (imageData[byteOffset] >> ((8 - bits) - (bit % 8))) & ((1 << bits) - 1);
+                        if (index >= paletteLength)
+                            destLine[x .. x + unpackBytes] = 0; // out of palette; assign black
+                        else
+                            destLine[x .. x + unpackBytes] = paletteData[index * unpackBytes .. index * unpackBytes + unpackBytes];
+                    }
+                    if (topDown)
+                        imageData += pitch;
                     else
-                        destLine[x .. x + unpackBytes] = paletteData[index * unpackBytes .. index * unpackBytes + unpackBytes];
+                        imageData -= pitch;
+                    destLine += unpackPitch;
                 }
-                if (topDown)
-                    imageData += pitch;
-                else
-                    imageData -= pitch;
-                destLine += unpackPitch;
+            }
+            else if (compression == Compression.BI_RLE8 || compression == Compression.BI_CMYKRLE8)
+            {
+                ubyte* destLine = raw.ptr;
+                ubyte* destPixel = destLine;
+                ubyte* eol = destLine + unpackBytes*width;
+                ubyte* end = destLine + unpackPitch*height;
+                outer: while(true)
+                {
+                    ubyte count = *imageData++;
+                    if (count == 0)
+                    {
+                        // raw data
+                        count = *imageData++;
+
+                        if (count == 0)
+                        {
+                            // end of scanline
+                            destLine += unpackPitch;
+                            if (destLine >= end)
+                                break;
+                            destPixel = destLine;
+                            eol = destLine + unpackBytes*width;
+                        }
+                        else if (count == 1)
+                        {
+                            // end of image
+                            break;
+                        }
+                        else if (count == 2)
+                        {
+                            // delta code
+                            ubyte x = *imageData++;
+                            ubyte y = *imageData++;
+                            destPixel += unpackBytes*x; // what if is past end of line?
+                            destPixel += unpackPitch*y;
+                            destLine += unpackPitch*y;
+                            if (destLine >= end)
+                                break;
+                            eol = destLine + unpackBytes*width;
+                        }
+                        else
+                        {
+                            // take count
+                            foreach (i; 0 .. count)
+                            {
+                                if (destPixel == eol)
+                                {
+                                    destLine += unpackPitch;
+                                    if (destLine >= end)
+                                        break outer;
+                                    destPixel = destLine;
+                                    eol = destLine + unpackBytes*width;
+                                }
+
+                                ubyte value = *imageData++;
+                                destPixel[0 .. unpackBytes] = paletteData[value * unpackBytes .. value * unpackBytes + unpackBytes];
+                                destPixel += unpackBytes;
+                            }
+                            if (count & 1)
+                                imageData++;
+                        }
+                    }
+                    else
+                    {
+                        // run length
+                        ubyte value = *imageData++;
+                        foreach (i; 0 .. count)
+                        {
+                            if (destPixel == eol)
+                            {
+                                destLine += unpackPitch;
+                                if (destLine >= end)
+                                    break outer;
+                                destPixel = destLine;
+                                eol = destLine + unpackBytes*width;
+                            }
+
+                            destPixel[0 .. unpackBytes] = paletteData[value * unpackBytes .. value * unpackBytes + unpackBytes];
+                            destPixel += unpackBytes;
+                        }
+                    }
+                }
+            }
+            else if (compression == Compression.BI_RLE4 || compression == Compression.BI_CMYKRLE4)
+            {
             }
 
             bits = unpackBits;
             pitch = unpackPitch;
             imageData = cast(inout(ubyte)*)raw.ptr;
         }
-        else if (compression != Compression.BI_RGB)
+        else if (compression == Compression.BI_JPEG)
         {
-            // decoding...
             assert(false);
+        }
+        else if (compression == Compression.BI_PNG)
+        {
+            assert(false);
+        }
+
+        MetaData* metadata = null;
+        if (md != md.init)
+        {
+            void[] mem = new void[MetaData.sizeof + CommonMetadata.sizeof];
+            metadata = cast(MetaData*)mem.ptr;
+            metadata.magic = CommonMetadata.ID;
+            metadata.bytes = CommonMetadata.sizeof;
+            metadata.next = null;
+
+            CommonMetadata* common = cast(CommonMetadata*)metadata.data().ptr;
+            *common = md;
         }
 
         return inout(ImageBuffer)(
@@ -388,27 +556,9 @@ struct BMPImage
             0,
             imageData,
             format.ptr,
-            null
+            cast(inout(MetaData*))metadata
         );
     }
-}
-
-unittest
-{
-    import std.file;
-    import wg.image;
-    import wg.color.rgb;
-
-    void[] file = read("pal8.bmp");
-
-    auto bmp = BMPImage(file);
-    ImageBuffer buf = bmp.getImage();
-
-    const img = Image!(RGB!"bgrx")(buf);
-    auto pix = img.at(0, 0);
-
-    void[] output = writeBMP(img.buffer());
-    write("output.bmp", output);
 }
 
 
