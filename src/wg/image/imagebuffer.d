@@ -107,7 +107,7 @@ inout(void)[] getPixel(ref inout(ImageBuffer) image, uint x, uint y)
 
 
 // HACK
-inout(char)[] asDString(inout(char)* cstr) @trusted
+inout(char)[] asDString(inout(char)* cstr) pure nothrow @nogc @trusted
 {
     if (!cstr)
         return null;

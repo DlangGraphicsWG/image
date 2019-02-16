@@ -25,6 +25,20 @@ struct Allocator
         freeFunc(mem.ptr, mem.length, userData);
         return true;
     }
+
+    // helpers to destroy objects
+    bool deallocate(T)(T cls) @nogc nothrow if (is(T == class))
+    {
+        cls.destroy!false();
+        freeFunc(cast(void*)cls, __traits(classInstanceSize, T), userData);
+        return true;
+    }
+    bool deallocate(T)(T* obj) @nogc nothrow if (is(T == struct))
+    {
+        obj.destroy!false();
+        freeFunc(obj, T.sizeof, userData);
+        return true;
+    }
 }
 
 /**
