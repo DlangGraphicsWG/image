@@ -46,7 +46,7 @@ template FormatForPixelType(T)
     mixin("import " ~ moduleName!T ~ ";");
     mixin("alias M = " ~ moduleName!T ~ ";");
 
-    // expect a template called `getFormatString` beside every colour type
+    // expect a template called `FormatString` beside every colour type
     enum FormatForPixelType = M.FormatString!T;
 }
 

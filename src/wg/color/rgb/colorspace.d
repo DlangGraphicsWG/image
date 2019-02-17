@@ -178,7 +178,51 @@ unittest
     assert(abs(v - hybridGammaToLinear!(a, b, s, e)(0.5)) < double.epsilon);
 }
 
-/** Find an RGB color space by name */
+/**
+ * RGB to XYZ color space transformation matrix.$(BR)
+ * $(D_INLINECODE cs) describes the source RGB color space.
+ */
+float[3][3] rgbToXyzMatrix()(auto ref RGBColorSpace cs) pure nothrow @nogc @safe
+{
+    import wg.color.xyz : XYZ, xyY;
+    import wg.util.math : multiply, inverse;
+
+    // TODO: perhaps we should store the CS data in XYZ!
+    //       this conversion is kinda redundant...
+    static XYZ toXYZ(xyY c) { return c.y == 0 ? XYZ() : XYZ(c.x / c.y, 1, (1 - c.x - c.y) / c.y); }
+    auto r = toXYZ(cs.red);
+    auto g = toXYZ(cs.green);
+    auto b = toXYZ(cs.blue);
+
+    // build a matrix from the 3 color vectors
+    float[3][3] m = [[ r.X, g.X, b.X],
+                     [ r.Y, g.Y, b.Y],
+                     [ r.Z, g.Z, b.Z]];
+
+    // multiply by the whitepoint
+    float[3] w = [ toXYZ(cs.white).tupleof ];
+    auto s = multiply(m.inverse(), w);
+
+    // return colorspace matrix (RGB -> XYZ)
+    return [[ r.X*s[0], g.X*s[1], b.X*s[2] ],
+            [ r.Y*s[0], g.Y*s[1], b.Y*s[2] ],
+            [ r.Z*s[0], g.Z*s[1], b.Z*s[2] ]];
+}
+
+/**
+ * XYZ to RGB color space transformation matrix.$(BR)
+ * $(D_INLINECODE cs) describes the target RGB color space.
+ */
+float[3][3] xyzToRgbMatrix()(auto ref RGBColorSpace cs) pure nothrow @nogc @safe
+{
+    import wg.util.math : inverse;
+
+    return cs.rgbToXyzMatrix().inverse();
+}
+
+/**
+ * Find an RGB color space by name.
+ */
 immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @nogc
 {
     foreach (ref a; csAliases)

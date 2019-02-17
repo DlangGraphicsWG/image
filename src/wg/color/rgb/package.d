@@ -3,11 +3,25 @@ module wg.color.rgb;
 public import wg.color.rgb.colorspace;
 public import wg.color.rgb.format;
 
+import wg.color.xyz : XYZ;
 import wg.util.traits : isFloatingPoint;
 import wg.util.normint;
 
 import std.typecons : tuple;
 import std.meta : AliasSeq;
+
+/**
+ * Determine if T is an RGB color type.
+ */
+enum IsRGB(T) = is(T == RGB!fmt, string fmt);
+
+/**
+ * Get the canonical format string for an RGB type.
+ */
+template FormatString(T) if (is(T == RGB!fmt, string fmt))
+{
+    enum FormatString = makeFormatString(T.Format);
+}
 
 /**
  * RGB colour type.
@@ -17,6 +31,8 @@ struct RGB(string format)
     // make the format data available
     enum Format = parseRGBFormat(format);
     enum ColorSpace = parseRGBColorSpace(Format.colorSpace);
+
+    alias ParentColor = XYZ;
 
     enum isOperable = (Format.flags & RGBFormatDescriptor.Flags.AllSameFormat) &&
                       (Format.flags & RGBFormatDescriptor.Flags.AllAligned) &&
@@ -119,12 +135,178 @@ unittest
     static assert(is(typeof(pixel2.a) == float));
 }
 
-/**
- * Get the canonical format string for an RGB type.
- */
-template FormatString(T) if (is(T == RGB!fmt, string fmt))
+
+package(wg.color):
+
+// trim the `^gamma` from colorspace id strings
+private const(char)[] exGamma(return scope const(char)[] cs)
 {
-    enum FormatString = makeFormatString(T.Format);
+    foreach (i; 0 .. cs.length)
+        if (cs[i] == '^')
+            return cs[0 .. i];
+    return cs;
+}
+
+To convertColorImpl(To, string format)(RGB!format color) if (is(To == RGB!fmt, string fmt))
+{
+    alias From = typeof(color);
+
+    auto src = color.tristimulusWithAlpha;
+
+    static if (From.ColorSpace.id[] == To.ColorSpace.id[])
+    {
+        // color space is the same, just do type conversion
+        static if (To.isOperable)
+        {
+            alias CT = To.ComponentType;
+            return To(cast(CT)src[0], cast(CT)src[1], cast(CT)src[2], cast(CT)src[3]);
+        }
+        else
+        {
+            // each component does something different...
+            static assert(false, "TODO: inoperable (compressed) RGB types");
+        }
+    }
+    else
+    {
+        // unpack the working values
+        float r = cast(float)src[0];
+        float g = cast(float)src[1];
+        float b = cast(float)src[2];
+
+        static if (From.ColorSpace.gamma[] != "1")
+        {
+            alias FromGamma = GammaFuncPair!(From.ColorSpace.gamma);
+            r = FromGamma.toLinear(r);
+            g = FromGamma.toLinear(g);
+            b = FromGamma.toLinear(b);
+        }
+        static if (exGamma(From.ColorSpace.id)[] != exGamma(To.ColorSpace.id)[])
+        {
+            import wg.util.math : multiply;
+
+            // TODO: we should do better chromatic adaptation...
+
+            enum toXYZ = From.ColorSpace.rgbToXyzMatrix();
+            enum toRGB = To.ColorSpace.xyzToRgbMatrix();
+            enum mat = multiply(toXYZ, toRGB);
+            float[3] v = multiply(mat, [r, g, b]);
+            r = v[0]; g = v[1]; b = v[2];
+        }
+        static if (To.ColorSpace.gamma[] != "1")
+        {
+            alias ToGamma = GammaFuncPair!(To.ColorSpace.gamma);
+            r = ToGamma.toGamma(r);
+            g = ToGamma.toGamma(g);
+            b = ToGamma.toGamma(b);
+        }
+
+        // convert and return the output
+        static if (To.isOperable)
+        {
+            alias CT = To.ComponentType;
+            return To(cast(CT)r, cast(CT)g, cast(CT)b, cast(CT)src[3]);
+        }
+        else
+        {
+            // each component does something different...
+            static assert(false, "TODO: inoperable (compressed) RGB types");
+        }
+    }
+}
+unittest
+{
+//    // test RGB format conversions
+//    alias UnsignedRGB = RGB!("rgb", ubyte);
+//    alias SignedRGBX = RGB!("rgbx", byte);
+//    alias FloatRGBA = RGB!("rgba", float);
+//
+//    static assert(convertColorImpl!(UnsignedRGB)(SignedRGBX(0x20,0x30,-10)) == UnsignedRGB(0x40,0x60,0));
+//    static assert(convertColorImpl!(UnsignedRGB)(FloatRGBA(1,0.5,0,1)) == UnsignedRGB(0xFF,0x80,0));
+//    static assert(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0)) == FloatRGBA(1,float(0x80)/float(0xFF),0,0));
+//    static assert(convertColorImpl!(FloatRGBA)(SignedRGBX(127,-127,-128)) == FloatRGBA(1,-1,-1,0));
+//
+//    static assert(convertColorImpl!(UnsignedRGB)(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0))) == UnsignedRGB(0xFF,0x80,0));
+//
+//    // test greyscale conversion
+//    alias UnsignedL = RGB!("l", ubyte);
+//    static assert(cast(UnsignedL)UnsignedRGB(0xFF,0x20,0x40) == UnsignedL(82));
+//
+//    // TODO: we can't test this properly since DMD can't CTFE the '^^' operator! >_<
+//
+//    alias sRGBA = RGB!("rgba", ubyte, false, RGBColorSpace.sRGB);
+//
+//    // test linear conversion
+//    alias lRGBA = RGB!("rgba", ushort, true, RGBColorSpace.sRGB);
+//    assert(convertColorImpl!(lRGBA)(sRGBA(0xFF, 0xFF, 0xFF, 0xFF)) == lRGBA(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF));
+//
+//    // test gamma conversion
+//    alias gRGBA = RGB!("rgba", byte, false, RGBColorSpace.sRGB_Gamma2_2);
+//    assert(convertColorImpl!(gRGBA)(sRGBA(0xFF, 0x80, 0x01, 0xFF)) == gRGBA(0x7F, 0x3F, 0x03, 0x7F));
+}
+
+To convertColorImpl(To, string format)(RGB!format color) if (is(To == XYZ))
+{
+    import wg.util.math : multiply;
+
+    alias Src = typeof(color);
+    alias CS = Src.ColorSpace;
+
+    // unpack the working values
+    auto rgb = color.tristimulus;
+    float r = cast(float)rgb[0];
+    float g = cast(float)rgb[1];
+    float b = cast(float)rgb[2];
+
+    static if (CS.gamma[] != "1")
+    {
+        alias Gamma = GammaFuncPair!(CS.gamma);
+        r = Gamma.toLinear(r);
+        g = Gamma.toLinear(g);
+        b = Gamma.toLinear(b);
+    }
+
+    // transform to XYZ
+    enum toXYZ = CS.rgbToXyzMatrix();
+    float[3] v = multiply(toXYZ, [r, g, b]);
+    return To(v[0], v[1], v[2]);
+}
+unittest
+{
+    // TODO: needs approx ==
+}
+
+To convertColorImpl(To)(XYZ color) if(is(To == RGB!fmt, string fmt))
+{
+    import wg.util.math : multiply;
+
+    alias CS = To.ColorSpace;
+
+    enum toRGB = CS.xyzToRgbMatrix();
+    float[3] v = multiply(toRGB, [ color.X, color.Y, color.Z ]);
+
+    static if (CS.gamma[] != "1")
+    {
+        alias Gamma = GammaFuncPair!(CS.gamma);
+        v[0] = Gamma.toGamma(v[0]);
+        v[1] = Gamma.toGamma(v[1]);
+        v[2] = Gamma.toGamma(v[2]);
+    }
+
+    static if (To.isOperable)
+    {
+        alias CT = To.ComponentType;
+        return To(cast(CT)v[0], cast(CT)v[1], cast(CT)v[2]);
+    }
+    else
+    {
+        // each component does something different...
+        static assert(false, "TODO: inoperable (compressed) RGB types");
+    }
+}
+unittest
+{
+    // TODO: needs approx ==
 }
 
 

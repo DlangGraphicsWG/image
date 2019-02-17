@@ -168,8 +168,136 @@ enum Colors
     yellowGreen          = RGB8(154,205,50)   /// <font color=yellowGreen>&#x25FC;</font>
 }
 
+/**
+ * Convert between _color types.
+ * 
+ * Conversion is always supported between any pair of valid _color types.
+ * Colour types usually implement only direct conversion between their immediate 'parent' _color type.
+ * In the case of distantly related colors, convertColor will follow a conversion path via
+ * intermediate representations such that it is able to perform the conversion.
+ * 
+ * For instance, a conversion from HSV to Lab necessary follows the conversion path: HSV -> RGB -> XYZ -> Lab.
+ * 
+ * Params: color = A _color in some source format.
+ * Returns: $(D_INLINECODE color) converted to the target format.
+ */
+To convertColor(To, From)(From color) @safe pure nothrow @nogc
+{
+    // cast along a conversion path to reach our target conversion
+    alias Path = ConversionPath!(From, To);
+
+    // no conversion is necessary
+    static if (Path.length == 0)
+        return color;
+    else
+    {
+        import std.traits : moduleName;
+
+        alias Target = Path[0];
+
+        // this hack emulates ADL
+        mixin("import " ~ moduleName!Target ~ " : destConvert = convertColorImpl;");
+        static if (__traits(compiles, color.destConvert!Target()))
+        {
+            static if (Path.length > 1)
+                return color.destConvert!Target().convertColor!To();
+            else
+                return color.destConvert!Target();
+        }
+        else
+        {
+            mixin("import " ~ moduleName!From ~ " : srcConvert = convertColorImpl;");
+            static if (Path.length > 1)
+                return color.srcConvert!Target().convertColor!To();
+            else
+                return color.srcConvert!Target();
+        }
+    }
+}
+///
+unittest
+{
+    import wg.color;
+    import wg.color.xyz;
+
+    assert(RGBA8(0xFF, 0xFF, 0xFF, 0xFF).convertColor!xyY().convertColor!RGBA8() == RGBA8(0xFF, 0xFF, 0xFF, 0));
+    assert(RGB8(0xFF, 0x80, 0x10).convertColor!RGBA8() == RGBA8(0xFF, 0x80, 0x10, 0x00));
+}
+
 
 private:
+
+import std.traits : TemplateOf, isInstanceOf;
+import std.meta : AliasSeq;
+
+template isSameKind(Ty1, Ty2)
+{
+    static if (is(TemplateOf!Ty1 == void))
+        enum isSameKind = is(Ty1 == Ty2);
+    else
+        enum isSameKind = isInstanceOf!(TemplateOf!Ty1, Ty2);
+}
+template isParentType(Parent, Of)
+{
+    static if (!is(Of.ParentColor))
+        enum isParentType = false;
+    else static if (isSameKind!(Parent, Of.ParentColor))
+        enum isParentType = true;
+    else
+        enum isParentType = isParentType!(Parent, Of.ParentColor);
+}
+template FindPath(From, To)
+{
+    static if (isSameKind!(To, From))
+        alias FindPath = AliasSeq!(To);
+    else static if (isParentType!(From, To))
+        alias FindPath = AliasSeq!(FindPath!(From, To.ParentColor), To);
+    else static if (is(From.ParentColor))
+        alias FindPath = AliasSeq!(From, FindPath!(From.ParentColor, To));
+    else
+        static assert(false, "Shouldn't be here!");
+}
+
+// find the conversion path from one distant type to another
+template ConversionPath(From, To)
+{
+    import wg.util.traits : Unqual;
+
+    static if (is(Unqual!From == Unqual!To))
+    {
+        alias ConversionPath = AliasSeq!();
+    }
+    else
+    {
+        alias Path = FindPath!(Unqual!From, Unqual!To);
+        static if (Path.length == 1 && !is(Path[0] == From))
+            alias ConversionPath = Path;
+        else
+            alias ConversionPath = Path[1..$];
+    }
+}
+unittest
+{
+    import wg.color;
+    import wg.color.xyz;
+
+    // test indirect conversion paths
+    static assert(is(ConversionPath!(XYZ, XYZ) == AliasSeq!()));
+    static assert(is(ConversionPath!(RGB8, RGB8) == AliasSeq!()));
+
+    static assert(is(ConversionPath!(xyY, XYZ) == AliasSeq!(XYZ)));
+    static assert(is(ConversionPath!(XYZ, xyY) == AliasSeq!(xyY)));
+
+    static assert(is(ConversionPath!(RGB8, XYZ) == AliasSeq!(XYZ)));
+    static assert(is(ConversionPath!(XYZ, RGBA8) == AliasSeq!(RGBA8)));
+    static assert(is(ConversionPath!(RGB8, RGBA8) == AliasSeq!(RGBA8)));
+
+    static assert(is(ConversionPath!(xyY, RGBA8) == AliasSeq!(XYZ, RGBA8)));
+    static assert(is(ConversionPath!(RGB8, xyY) == AliasSeq!(XYZ, xyY)));
+
+    // test attributes
+    static assert(is(ConversionPath!(shared RGBA8, immutable xyY) == AliasSeq!(XYZ, xyY)));
+}
 
 shared static this()
 {
