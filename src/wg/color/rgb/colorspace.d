@@ -17,8 +17,8 @@ import wg.util.traits : isFloatingPoint;
 
 
 /**
- Parameters that define an RGB color space.$(BR)
- $(D_INLINECODE F) is the float type that should be used for the colors and gamma functions.
+ * Parameters that define an RGB color space.$(BR)
+ * $(D_INLINECODE F) is the float type that should be used for the colors and gamma functions.
  */
 struct RGBColorSpace
 {
@@ -39,10 +39,32 @@ struct RGBColorSpace
     xyY green;
     /** Blue point. */
     xyY blue;
+
+    /** RGB to XYZ conversion matrix. */
+    float[3][3] rgbToXyz = [0, 0, 0];
+
+    /** XYZ to RGB conversion matrix. */
+    float[3][3] xyzToRgb = [0, 0, 0];
+
+    /** Construct an RGB color space from primaries and whitepoint. */
+    this()(const(char)[] id, string name, const(char)[] gamma, auto ref xyY white, auto ref xyY red, auto ref xyY green, auto ref xyY blue) pure nothrow @nogc @safe
+    {
+        this.id = id;
+        this.name = name;
+        this.gamma = gamma;
+        this.white = white;
+        this.red = red;
+        this.green = green;
+        this.blue = blue;
+
+        import wg.util.math : inverse;
+        rgbToXyz = rgbToXyzMatrix(red, green, blue, white);
+        xyzToRgb = rgbToXyz.inverse();
+    }
 }
 
 /**
- Pair of gamma functions.
+ * Pair of gamma functions.
  */
 struct GammaFuncPair(F) if (isFloatingPoint!F)
 {
@@ -59,9 +81,9 @@ struct GammaFuncPair(F) if (isFloatingPoint!F)
 }
 
 /**
- Pair of named gamma functions from string.
+ * Pair of named gamma functions from string.
  */
-struct GammaFuncPair(string func, F = float) if (isFloatingPoint!F)
+struct GammaFuncPair(const(char)[] func, F = float) if (isFloatingPoint!F)
 {
     enum name = func;
 
@@ -85,9 +107,9 @@ struct GammaFuncPair(string func, F = float) if (isFloatingPoint!F)
         alias toGamma = (F v) => v;
         alias toLinear = (F v) => v;
     }
-    else static if (parseReal(func) == func.length)
+    else static if (isFloatString(func))
     {
-        enum F gamma = parseReal(func);
+        enum F gamma = parseReal!F(func);
 
         alias toGamma = linearToGamma!(gamma, F);
         alias toLinear = gammaToLinear!(gamma, F);
@@ -182,25 +204,24 @@ unittest
  * RGB to XYZ color space transformation matrix.$(BR)
  * $(D_INLINECODE cs) describes the source RGB color space.
  */
-float[3][3] rgbToXyzMatrix()(auto ref RGBColorSpace cs) pure nothrow @nogc @safe
+float[3][3] rgbToXyzMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY blue, auto ref xyY white) pure nothrow @nogc @safe
 {
-    import wg.color.xyz : XYZ, xyY;
+    import wg.color.xyz : XYZ;
     import wg.util.math : multiply, inverse;
 
-    // TODO: perhaps we should store the CS data in XYZ!
-    //       this conversion is kinda redundant...
     static XYZ toXYZ(xyY c) { return c.y == 0 ? XYZ() : XYZ(c.x / c.y, 1, (1 - c.x - c.y) / c.y); }
-    auto r = toXYZ(cs.red);
-    auto g = toXYZ(cs.green);
-    auto b = toXYZ(cs.blue);
+
+    auto r = toXYZ(red);
+    auto g = toXYZ(green);
+    auto b = toXYZ(blue);
 
     // build a matrix from the 3 color vectors
-    float[3][3] m = [[ r.X, g.X, b.X],
-                     [ r.Y, g.Y, b.Y],
-                     [ r.Z, g.Z, b.Z]];
+    float[3][3] m = [[ r.X, g.X, b.X ],
+                     [ r.Y, g.Y, b.Y ],
+                     [ r.Z, g.Z, b.Z ]];
 
     // multiply by the whitepoint
-    float[3] w = [ toXYZ(cs.white).tupleof ];
+    float[3] w = [ toXYZ(white).tupleof ];
     auto s = multiply(m.inverse(), w);
 
     // return colorspace matrix (RGB -> XYZ)
@@ -213,11 +234,11 @@ float[3][3] rgbToXyzMatrix()(auto ref RGBColorSpace cs) pure nothrow @nogc @safe
  * XYZ to RGB color space transformation matrix.$(BR)
  * $(D_INLINECODE cs) describes the target RGB color space.
  */
-float[3][3] xyzToRgbMatrix()(auto ref RGBColorSpace cs) pure nothrow @nogc @safe
+float[3][3] xyzToRgbMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY blue, auto ref xyY white) pure nothrow @nogc @safe
 {
     import wg.util.math : inverse;
 
-    return cs.rgbToXyzMatrix().inverse();
+    return rgbToXyzMatrix(red, green, blue, white).inverse();
 }
 
 /**
@@ -388,6 +409,8 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
     const(char)[] gamma = popBackToken(s, '^');         // Eg: `^2.4`
     const(char)[] whitePoint = popBackToken(s, '@');    // Eg: `@D65`
 
+    bool buildMatrices = false;
+
     // find a satandard colour space
     immutable(RGBColorSpace)* found = findRGBColorspace(s);
     if (found)
@@ -426,11 +449,17 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
         // default to sRGB white and gamma
         cs.white = StandardIlluminant.D65;
         cs.gamma = "sRGB";
+
+        buildMatrices = true;
     }
 
     // parse the gamma and whitepoint overrides
-    if (whitePoint.length > 0 && !whitePoint.parseWhitePoint(cs.white))
-        return 0;
+    if (whitePoint.length > 0)
+    {
+        if (!whitePoint.parseWhitePoint(cs.white))
+            return 0;
+        buildMatrices = true;
+    }
     if (gamma.length > 0)
         cs.gamma = gamma;
 
@@ -438,10 +467,44 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
     if (!found || whitePoint.length > 0 || gamma.length > 0)
         cs.id = str;
 
+    // build the RGB/XYZ conversion matrices
+    if (buildMatrices)
+    {
+        import wg.util.math : inverse;
+        cs.rgbToXyz = rgbToXyzMatrix(cs.red, cs.green, cs.blue, cs.white);
+        cs.xyzToRgb = cs.rgbToXyz.inverse();
+    }
+
     return str.length;
 }
 
+// TODO: put these utility functions somewhere else?
 bool isSubString(const(char)[] subStr, const(char)[] str) pure nothrow @nogc @safe
 {
     return &str[0] <= &subStr[0] && &str[$-1] >= &subStr[$-1];
+}
+
+bool isFloatString(const(char)[] str) pure nothrow @nogc @safe
+{
+    if (str.length == 0)
+        return false;
+    if (str[0] == '-' || str[0] == '+')
+        str = str[1 .. $];
+    bool hasDot = false;
+    int numCount = 0;
+    foreach (c; str)
+    {
+        if (c == '.')
+        {
+            if (hasDot)
+                return false;
+            hasDot = true;
+            numCount = 0;
+        }
+        else if (c < '0' || c > '9')
+            return false;
+        else
+            ++numCount;
+    }
+    return numCount > 0;
 }

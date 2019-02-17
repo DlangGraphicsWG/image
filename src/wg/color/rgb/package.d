@@ -187,9 +187,7 @@ To convertColorImpl(To, string format)(RGB!format color) if (is(To == RGB!fmt, s
 
             // TODO: we should do better chromatic adaptation...
 
-            enum toXYZ = From.ColorSpace.rgbToXyzMatrix();
-            enum toRGB = To.ColorSpace.xyzToRgbMatrix();
-            enum mat = multiply(toXYZ, toRGB);
+            enum mat = multiply(From.ColorSpace.rgbToXyz, To.ColorSpace.xyzToRgb);
             float[3] v = multiply(mat, [r, g, b]);
             r = v[0]; g = v[1]; b = v[2];
         }
@@ -216,33 +214,31 @@ To convertColorImpl(To, string format)(RGB!format color) if (is(To == RGB!fmt, s
 }
 unittest
 {
-//    // test RGB format conversions
-//    alias UnsignedRGB = RGB!("rgb", ubyte);
-//    alias SignedRGBX = RGB!("rgbx", byte);
-//    alias FloatRGBA = RGB!("rgba", float);
-//
-//    static assert(convertColorImpl!(UnsignedRGB)(SignedRGBX(0x20,0x30,-10)) == UnsignedRGB(0x40,0x60,0));
-//    static assert(convertColorImpl!(UnsignedRGB)(FloatRGBA(1,0.5,0,1)) == UnsignedRGB(0xFF,0x80,0));
-//    static assert(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0)) == FloatRGBA(1,float(0x80)/float(0xFF),0,0));
-//    static assert(convertColorImpl!(FloatRGBA)(SignedRGBX(127,-127,-128)) == FloatRGBA(1,-1,-1,0));
-//
-//    static assert(convertColorImpl!(UnsignedRGB)(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0))) == UnsignedRGB(0xFF,0x80,0));
-//
-//    // test greyscale conversion
-//    alias UnsignedL = RGB!("l", ubyte);
-//    static assert(cast(UnsignedL)UnsignedRGB(0xFF,0x20,0x40) == UnsignedL(82));
-//
-//    // TODO: we can't test this properly since DMD can't CTFE the '^^' operator! >_<
-//
-//    alias sRGBA = RGB!("rgba", ubyte, false, RGBColorSpace.sRGB);
-//
-//    // test linear conversion
-//    alias lRGBA = RGB!("rgba", ushort, true, RGBColorSpace.sRGB);
-//    assert(convertColorImpl!(lRGBA)(sRGBA(0xFF, 0xFF, 0xFF, 0xFF)) == lRGBA(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF));
-//
-//    // test gamma conversion
-//    alias gRGBA = RGB!("rgba", byte, false, RGBColorSpace.sRGB_Gamma2_2);
-//    assert(convertColorImpl!(gRGBA)(sRGBA(0xFF, 0x80, 0x01, 0xFF)) == gRGBA(0x7F, 0x3F, 0x03, 0x7F));
+    import wg.color : RGBA8;
+
+    // test RGB format conversions
+    alias UnsignedRGB = RGB!("rgb");
+    alias SignedRGBX = RGB!("rgbx_s8_s8_s8_s8");
+    alias FloatRGBA = RGB!("rgba_f32_f32_f32_f32");
+
+    static assert(convertColorImpl!(UnsignedRGB)(SignedRGBX(0x20,0x30,-10)) == UnsignedRGB(0x40,0x60,0));
+    static assert(convertColorImpl!(UnsignedRGB)(FloatRGBA(1,0.5,0,1)) == UnsignedRGB(0xFF,0x80,0));
+    static assert(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0)) == FloatRGBA(1,float(0x80)/float(0xFF),0,0));
+    static assert(convertColorImpl!(FloatRGBA)(SignedRGBX(127,-127,-128)) == FloatRGBA(1,-1,-1,0));
+
+    static assert(convertColorImpl!(UnsignedRGB)(convertColorImpl!(FloatRGBA)(UnsignedRGB(0xFF,0x80,0))) == UnsignedRGB(0xFF,0x80,0));
+
+    // test greyscale conversion
+    alias UnsignedL = RGB!"l";
+    static assert(convertColorImpl!(UnsignedL)(UnsignedRGB(0xFF,0x20,0x40)) == UnsignedL(82));
+
+    // test linear conversion
+    alias lRGBA = RGB!("rgba_16_16_16_16_sRGB^1");
+    static assert(convertColorImpl!(lRGBA)(RGBA8(0xFF, 0x80, 0x02, 0x40)) == lRGBA(0xFFFF, 0x3742, 0x0028, 0x4040));
+
+    // test gamma conversion
+    alias gRGBA = RGB!("rgba_s8_s8_s8_s8_sRGB^2.2");
+    static assert(convertColorImpl!(gRGBA)(RGBA8(0xFF, 0x80, 0x01, 0xFF)) == gRGBA(0x7F, 0x3F, 0x03, 0x7F));
 }
 
 To convertColorImpl(To, string format)(RGB!format color) if (is(To == XYZ))
@@ -267,8 +263,7 @@ To convertColorImpl(To, string format)(RGB!format color) if (is(To == XYZ))
     }
 
     // transform to XYZ
-    enum toXYZ = CS.rgbToXyzMatrix();
-    float[3] v = multiply(toXYZ, [r, g, b]);
+    float[3] v = multiply(CS.rgbToXyz, [r, g, b]);
     return To(v[0], v[1], v[2]);
 }
 unittest
@@ -282,8 +277,7 @@ To convertColorImpl(To)(XYZ color) if(is(To == RGB!fmt, string fmt))
 
     alias CS = To.ColorSpace;
 
-    enum toRGB = CS.xyzToRgbMatrix();
-    float[3] v = multiply(toRGB, [ color.X, color.Y, color.Z ]);
+    float[3] v = multiply(CS.xyzToRgb, [ color.X, color.Y, color.Z ]);
 
     static if (CS.gamma[] != "1")
     {
