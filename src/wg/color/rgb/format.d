@@ -33,7 +33,7 @@ struct RGBFormatDescriptor
 
     enum Flags : ushort
     {
-        ComponentPresentMask = 0x7FF,
+        ComponentPresentMask = 0x7F,
 
         AnyFloating     = 1 << 10,
         AllFloating     = 1 << 11,
@@ -49,6 +49,7 @@ struct RGBFormatDescriptor
         Format format = Format.NormInt;
         ubyte bits = 8;
         ubyte fracBits = 0;
+        // TODO: find bits for float sign, or custom exponent bias?
     }
 
     byte bits;

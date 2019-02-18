@@ -170,6 +170,7 @@ To convertColorImpl(To, string format)(RGB!format color) if (is(To == RGB!fmt, s
     else
     {
         // unpack the working values
+        // TODO: this could surely be done with a lookup table!
         float r = cast(float)src[0];
         float g = cast(float)src[1];
         float b = cast(float)src[2];
@@ -249,6 +250,7 @@ To convertColorImpl(To, string format)(RGB!format color) if (is(To == XYZ))
     alias CS = Src.ColorSpace;
 
     // unpack the working values
+    // TODO: this could surely be done with a lookup table!
     auto rgb = color.tristimulus;
     float r = cast(float)rgb[0];
     float g = cast(float)rgb[1];
@@ -301,6 +303,34 @@ To convertColorImpl(To)(XYZ color) if(is(To == RGB!fmt, string fmt))
 unittest
 {
     // TODO: needs approx ==
+}
+
+void registerRGB()
+{
+    import wg.image.format : registerImageFormatFamily;
+    import wg.image.imagebuffer : ImageBuffer;
+
+    static bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe
+    {
+        import wg.color.rgb.format;
+
+        RGBFormatDescriptor desc;
+        RGBFormatDescriptor.ComponentDesc[6] components;
+
+        string error = parseRGBFormat(format, desc, components);
+
+        if (error)
+            return false;
+
+        image.width = width;
+        image.height = height;
+        image.bitsPerBlock = desc.bits;
+        image.rowPitch = (width*desc.bits + 7) / 8;
+
+        return true;
+    }
+
+    registerImageFormatFamily("rgb", &getImageParams);
 }
 
 
@@ -412,35 +442,4 @@ string componentExpression(string expression, char component, string op = null)
             buffer[o++] = expression[i];
     }
     return "static if (hasComponent!'" ~ component ~ "')\n\t" ~ buffer[0 .. o].idup;
-}
-
-
-package(wg.color):
-
-void registerRGB()
-{
-    import wg.image.format : registerImageFormatFamily;
-    import wg.image.imagebuffer : ImageBuffer;
-
-    static bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe
-    {
-        import wg.color.rgb.format;
-
-        RGBFormatDescriptor desc;
-        RGBFormatDescriptor.ComponentDesc[6] components;
-
-        string error = parseRGBFormat(format, desc, components);
-
-        if (error)
-            return false;
-
-        image.width = width;
-        image.height = height;
-        image.bitsPerBlock = desc.bits;
-        image.rowPitch = (width*desc.bits + 7) / 8;
-
-        return true;
-    }
-
-    registerImageFormatFamily("rgb", &getImageParams);
 }

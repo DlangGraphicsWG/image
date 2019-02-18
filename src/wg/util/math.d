@@ -38,7 +38,6 @@ F determinant(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
            m[0][2] * (m[1][0]*m[2][1] - m[1][1]*m[2][0]);
 }
 
-pragma(inline, true)
 F[3][3] inverse(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
 {
     F det = determinant(m);
