@@ -16,8 +16,24 @@ module wg.color.xyz;
 import wg.util.parse : skipWhite, parseReal;
 
 /**
-A CIE 1931 XYZ color, parameterised for component type.
-*/
+ * Determine if T is an XYZ color type.
+ */
+enum IsXYZ(T) = is(T == XYZ) || is(T == xyY);
+
+/**
+ * Get the format string for an XYZ or xyY color type.
+ */
+template FormatString(T) if (is(T == XYZ) || is(T == xyY))
+{
+    static if (is(T == XYZ))
+        enum FormatString = "XYZ";
+    else
+        enum FormatString = "xyY";
+}
+
+/**
+ * A CIE 1931 XYZ color.
+ */
 struct XYZ
 {
 @safe pure nothrow @nogc:
@@ -31,11 +47,12 @@ struct XYZ
 }
 
 /**
-A CIE 1931 xyY color, parameterised for component type.
-*/
+ * A CIE 1931 xyY color.
+ */
 struct xyY
 {
 @safe pure nothrow @nogc:
+    alias ParentColor = XYZ;
 
     /** x coordinate. */
     float x = 0;
@@ -105,19 +122,43 @@ size_t parseXYZ(XYZType)(const(char)[] str, out XYZType color) @trusted pure not
     return s.ptr + 1 - str.ptr;
 }
 
-/**
-* Get the format string for an XYZ or xyY color type.
-*/
-template FormatString(T) if (is(T == XYZ) || is(T == xyY))
-{
-    static if (is(T == XYZ))
-        enum FormatString = "XYZ";
-    else
-        enum FormatString = "xyY";
-}
-
 
 package:
+
+XYZ convertColorImpl(Dest)(xyY color) if(is(Dest == XYZ))
+{
+    if (color.y == 0)
+        return XYZ(0, 0, 0);
+    else
+        return XYZ((color.Y / color.y)*color.x, color.Y, (color.Y / color.y)*(1 - color.x - color.y));
+}
+unittest
+{
+    static assert(convertColorImpl!XYZ(xyY(0.5, 0.5, 1)) == XYZ(1, 1, 0));
+
+    // degenerate case
+    static assert(convertColorImpl!XYZ(xyY(0.5, 0, 1)) == XYZ(0, 0, 0));
+}
+
+xyY convertColorImpl(Dest)(XYZ color) if(is(Dest == xyY))
+{
+    import wg.color.standard_illuminant : StandardIlluminant;
+
+    float sum = color.X + color.Y + color.Z;
+    if (sum == 0)
+        return xyY(StandardIlluminant.D65.x, StandardIlluminant.D65.y, 0);
+    else
+        return xyY(color.X / sum, color.Y / sum, color.Y);
+}
+unittest
+{
+    static assert(convertColorImpl!xyY(XYZ(0.5, 1, 0.5)) == xyY(0.25, 0.5, 1));
+
+    // degenerate case
+    import wg.color.standard_illuminant : StandardIlluminant;
+    static assert(convertColorImpl!xyY(XYZ(0, 0, 0)) == xyY(StandardIlluminant.D65.x, StandardIlluminant.D65.y, 0));
+}
+
 
 void registerXYZ()
 {
@@ -128,6 +169,9 @@ void registerXYZ()
     {
         if (format[] != "XYZ" && format[] != "xyY")
             return false;
+
+        // the following code assumes they are the same size
+        assert(XYZ.sizeof == xyY.sizeof);
 
         image.width = width;
         image.height = height;
