@@ -50,13 +50,15 @@ struct RGB(string format)
                       (Format.flags & RGBFormatDescriptor.Flags.AllAligned) &&
                       (Format.flags & RGBFormatDescriptor.Flags.AllSameSize);
 
+    alias Component = RGBFormatDescriptor.Component;
+
+    enum hasComponent(char c) = mixin("is(typeof(" ~ c ~ "))");
+
     static if (isOperable)
     {
         /// format can have hard members
         alias ComponentType = TypeFor!(Format.components[0].format, Format.components[0].bits, Format.components[0].fracBits);
-
-        ///
-        enum hasComponent(char c) = mixin("is(typeof(" ~ c ~ "))");
+        alias MissingComponentType = ComponentType;
 
         /// the argument type used for construction and methods
         static if (isFloatingPoint!ComponentType)
@@ -88,8 +90,92 @@ struct RGB(string format)
     }
     else
     {
-        /// format needs bit-unpacking; components are properties
-        pragma(msg, "TODO: fabricate properties for the bitpacked members...");
+        static assert(Format.bits <= 64, "Packed pixel formats larger than 64bits not supported");
+
+        alias MissingComponentType = float; // float or NormalizedInt!ubyte?
+        alias PackedType = IntForSize!(Format.bits, false);
+
+        // packed data member
+        PackedType packed;
+
+        // getter functions
+        static if (HasComponent!(Component.Red))
+            @property ComponentType!(Component.Red) r() const pure nothrow @nogc @safe { return unpack!(Component.Red)(packed); }
+        static if (HasComponent!(Component.Green))
+            @property ComponentType!(Component.Green) g() const pure nothrow @nogc @safe { return unpack!(Component.Green)(packed); }
+        static if (HasComponent!(Component.Blue))
+            @property ComponentType!(Component.Blue) b() const pure nothrow @nogc @safe { return unpack!(Component.Blue)(packed); }
+        static if (HasComponent!(Component.Alpha))
+            @property ComponentType!(Component.Alpha) a() const pure nothrow @nogc @safe { return unpack!(Component.Alpha)(packed); }
+        static if (HasComponent!(Component.Luma))
+            @property ComponentType!(Component.Luma) l() const pure nothrow @nogc @safe { return unpack!(Component.Luma)(packed); }
+
+        /** Construct a color from RGB and optional alpha values. */
+        this(float r, float g, float b, float a = 0)
+        {
+            packed = 0;
+            static if (HasComponent!(Component.Red))
+                packed |= pack!(Component.Red)(r);
+            static if (HasComponent!(Component.Green))
+                packed |= pack!(Component.Green)(g);
+            static if (HasComponent!(Component.Blue))
+                packed |= pack!(Component.Blue)(b);
+            static if (HasComponent!(Component.Alpha))
+                packed |= pack!(Component.Alpha)(a);
+            static if (HasComponent!(Component.Luma))
+                packed |= pack!(Component.Luma)(toMonochrome!ColorSpace(r, g, b));
+        }
+
+        /** Construct a color from a luminance and optional alpha value. */
+        this(float l, float a = 0)
+        {
+            packed = 0;
+            static if (HasComponent!(Component.Red))
+                packed |= pack!(Component.Red)(l);
+            static if (HasComponent!(Component.Green))
+                packed |= pack!(Component.Green)(l);
+            static if (HasComponent!(Component.Blue))
+                packed |= pack!(Component.Blue)(l);
+            static if (HasComponent!(Component.Luma))
+                packed |= pack!(Component.Luma)(l);
+            static if (HasComponent!(Component.Alpha))
+                packed |= pack!(Component.Alpha)(a);
+        }
+
+    private:
+        // wrangle the components
+        enum HasComponent(Component type) = Format.has(type);
+        enum ComponentIndex(Component type) = Format.componentIndex[type];
+        enum ComponentDesc(Component type) = Format.components[Format.componentIndex[type]];
+
+        template ComponentType(Component type)
+        {
+            enum int index = ComponentIndex!type;
+            static if (index == -1)
+                alias ComponentType = MissingComponentType;
+            else
+                alias ComponentType = TypeFor!(ComponentDesc!type.format, ComponentDesc!type.bits, ComponentDesc!type.fracBits);
+        }
+
+        union PackedComponent(Component type)
+        {
+            PackedType pak = 0;
+            ComponentType!type val = void;
+        }
+        pragma(inline, true)
+        PackedType pack(Component type)(float val) pure nothrow @nogc @safe
+        {
+            PackedComponent!type u;
+            u.val = ComponentType!type(val);
+            return u.pak << ComponentDesc!type.offset;
+        }
+        pragma(inline, true)
+        ComponentType!type unpack(Component type)(PackedType val) const pure nothrow @nogc @safe
+        {
+            PackedComponent!type u = void;
+            u.pak = (val >> ComponentDesc!type.offset) & ((1 << ComponentDesc!type.bits) - 1);
+            return u.val;
+        }
     }
 
     /**
@@ -104,11 +190,11 @@ struct RGB(string format)
         else
         {
             static if (!hasComponent!'r')
-                enum r = ComponentType(0);
+                enum r = MissingComponentType(0);
             static if (!hasComponent!'g')
-                enum g = ComponentType(0);
+                enum g = MissingComponentType(0);
             static if (!hasComponent!'b')
-                enum b = ComponentType(0);
+                enum b = MissingComponentType(0);
             return tuple(r, g, b);
         }
     }
@@ -127,7 +213,7 @@ struct RGB(string format)
     @property auto tristimulusWithAlpha() const
     {
         static if (!hasComponent!'a')
-            enum a = ComponentType(0);
+            enum a = MissingComponentType(0);
         return tuple(tristimulus.expand, a);
     }
 
@@ -153,6 +239,16 @@ unittest
 
     static assert(is(typeof(pixel2.l) == float));
     static assert(is(typeof(pixel2.a) == float));
+
+    RGB!"rgba_10_10_10_2" pixel3;
+    pixel3 = typeof(pixel3)(1, 0.5, 0.1, 0.5);
+    assert(pixel3.tristimulusWithAlpha == tuple(0x3FF, 0x200, 0x66, 0x2));
+
+    RGB!"rgb_11_f11_f3.7" pixel4;
+    pixel4 = typeof(pixel4)(0.5, 0.5, 0.5);
+    assert(pixel4.tristimulus == tuple(0x400, 0.5f, 0.5f));
+    pixel4 = typeof(pixel4)(10, 10, 10);
+    assert(pixel4.tristimulus == tuple(0x7FF, 10.0f, 10.0f));
 }
 
 package(wg.color):
