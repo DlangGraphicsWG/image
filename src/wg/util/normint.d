@@ -29,7 +29,7 @@ Signed integers represent the values $(D_INLINECODE [-I.max, I.max]) to fraction
 
 Params: $(D_INLINECODE I) = $(D_INLINECODE (u)byte), $(D_INLINECODE (u)short), $(D_INLINECODE (u)int). $(D_INLINECODE (u)long) is not supported.
 */
-struct NormalizedInt(I) if (isNormalizedIntegralType!I)
+struct NormalizedInt(I, uint bits = I.sizeof*8) if (isNormalizedIntegralType!I && bits <= I.sizeof*8)
 {
 @safe:
 
@@ -44,13 +44,16 @@ pure nothrow @nogc:
     I value;
     alias value this;
 
+    /** Normalized int type; ie, typeof(this). */
+    alias NormType = typeof(this);
+
     /** Integral storage type. */
     alias IntType = I;
 
     /** Maximum integral value. */
-    enum I max = I.max;
+    enum I max = cast(I)((1L << bits - isSigned!I) - 1);
     /** Minimum integral value. */
-    enum I min = isSigned!I ? -cast(int)I.max : 0;
+    enum I min = isSigned!I ? -cast(int)max : 0;
 
     /** Maximum floating point value. */
     enum max_float = 1.0;
@@ -66,42 +69,41 @@ pure nothrow @nogc:
     /** Construct a $(D_INLINECODE NormalizedInt) from a floating point representation. The value is clamped to the range $(D_INLINECODE [min, max]). */
     this(F)(F value) if (isFloatingPoint!F)
     {
-        this.value = floatToNormInt!I(value);
+        this.value = floatToNormInt!(I, bits)(value);
     }
 
     /** Unary operators. */
-    NormalizedInt!I opUnary(string op)() const
+    NormType opUnary(string op)() const
     {
         static if (op == "-" && isUnsigned!I)
-            return NormalizedInt!I(0); // unsigned negate saturates at 0
+            return NormType(0); // unsigned negate saturates at 0
         else
-            return NormalizedInt!I(mixin("cast(I)" ~ op ~ "cast(WorkInt!I)value"));
+            return NormType(mixin("cast(I)" ~ op ~ "cast(WorkInt!I)value"));
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op)(NormalizedInt!I rh) const if (op == "+" || op == "-")
+    NormType opBinary(string op)(NormType rh) const if (op == "+" || op == "-")
     {
         auto r = mixin("cast(WorkInt!I)value " ~ op ~ " rh.value");
         r = _min(r, max);
         static if (op == "-")
             r = _max(r, min);
-        return NormalizedInt!I(cast(I)r);
+        return NormType(cast(I)r);
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op)(NormalizedInt!I rh) const if (op == "*" || op == "^^")
+    NormType opBinary(string op)(NormType rh) const if (op == "*" || op == "^^")
     {
-        static if (is(I == ubyte) && op == "*")
+        static if ((is(I == ubyte) || is(I == ushort)) && op == "*")
         {
-            uint r = cast(uint)value * rh.value;
-            r = r * 0x1011 >> 20;
-            return NormalizedInt!I(cast(I)r);
-        }
-        else static if (is(I == ushort) && op == "*")
-        {
-            ulong r = cast(ulong)value * rh.value;
-            r = r * 0x10_0011 >> 36;
-            return NormalizedInt!I(cast(I)r);
+            enum uint magic = (1 << (bits + 1)) + 3;
+            enum uint shift = bits*2 + 1;
+            static if (shift > 32 - bits)
+                ulong r = cast(ulong)value * rh.value;
+            else
+                uint r = cast(uint)value * rh.value;
+            r = r * magic >> shift;
+            return NormType(cast(I)r);
         }
         // *** SLOW PATH ***
         // do it with floats
@@ -116,7 +118,7 @@ pure nothrow @nogc:
                 b = _max(b, cast(double)min);
             }
             double r = a * b * (1.0/max);
-            return NormalizedInt!I(cast(I)r);
+            return NormType(cast(I)r);
         }
         else
         {
@@ -130,50 +132,50 @@ pure nothrow @nogc:
             }
             double r = a^^b * double(max);
             if (isUnsigned!I || r >= 0)
-                return NormalizedInt!I(cast(I)(r + 0.50));
+                return NormType(cast(I)(r + 0.50));
             else
-                return NormalizedInt!I(cast(I)(r - 0.50));
+                return NormType(cast(I)(r - 0.50));
         }
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op)(NormalizedInt!I rh) const if (op == "/" || op == "%")
+    NormType opBinary(string op)(NormType rh) const if (op == "/" || op == "%")
     {
         return mixin("this " ~ op ~ " cast(FloatTypeFor!I)rh");
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op, T)(T rh) const if (isNormalizedIntegralType!T && op == "*")
+    NormType opBinary(string op, T)(T rh) const if (isNormalizedIntegralType!T && op == "*")
     {
-        return NormalizedInt!I(cast(I)_clamp(cast(WorkInt!I)value * rh, min, max));
+        return NormType(cast(I)_clamp(cast(WorkInt!I)value * rh, min, max));
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op, T)(T rh) const if (isNormalizedIntegralType!T && (op == "/" || op == "%"))
+    NormType opBinary(string op, T)(T rh) const if (isNormalizedIntegralType!T && (op == "/" || op == "%"))
     {
-        return NormalizedInt!I(cast(I)mixin("value " ~ op ~ " rh"));
+        return NormType(cast(I)mixin("value " ~ op ~ " rh"));
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op, F)(F rh) const if (isFloatingPoint!F && (op == "*" || op == "/" || op == "%" || op == "^^"))
+    NormType opBinary(string op, F)(F rh) const if (isFloatingPoint!F && (op == "*" || op == "/" || op == "%" || op == "^^"))
     {
-        return NormalizedInt!I(mixin("(cast(F)this) " ~ op ~ " rh"));
+        return NormType(mixin("(cast(F)this) " ~ op ~ " rh"));
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op)(NormalizedInt!I rh) const if (op == "|" || op == "&" || op == "^")
+    NormType opBinary(string op)(NormType rh) const if (op == "|" || op == "&" || op == "^")
     {
-        return NormalizedInt!I(cast(I)(mixin("value " ~ op ~ " rh.value")));
+        return NormType(cast(I)(mixin("value " ~ op ~ " rh.value")));
     }
 
     /** Binary operators. */
-    NormalizedInt!I opBinary(string op)(int rh) const if (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == ">>>")
+    NormType opBinary(string op)(int rh) const if (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>" || op == ">>>")
     {
-        return NormalizedInt!I(cast(I)(mixin("value " ~ op ~ " rh")));
+        return NormType(cast(I)(mixin("value " ~ op ~ " rh")));
     }
 
     /** Equality operators. */
-    bool opEquals(NormalizedInt!I rh) const
+    bool opEquals(NormType rh) const
     {
         return value == rh.value;
     }
@@ -195,7 +197,7 @@ pure nothrow @nogc:
     }
 
     /** Comparison operators. */
-    int opCmp(NormalizedInt!I rh) const
+    int opCmp(NormType rh) const
     {
         return value - rh.value;
     }
@@ -212,25 +214,30 @@ pure nothrow @nogc:
     }
 
     /** Binary assignment operators. */
-    ref NormalizedInt!I opOpAssign(string op, T)(T rh) if (is(T == NormalizedInt!I) || isFloatingPoint!T || isNormalizedIntegralType!T)
+    ref NormType opOpAssign(string op, T)(T rh) if (is(T == NormType) || isFloatingPoint!T || isNormalizedIntegralType!T)
     {
         this = mixin("this " ~ op ~ "rh");
         return this;
     }
 
     /** Cast between $(D_INLINECODE NormalizedInt) types. */
-    NormInt opCast(NormInt)() const if (is(NormInt == NormalizedInt!T, T))
+    NormInt opCast(NormInt)() const if (is(NormInt == NormalizedInt!(T, b), T, uint b))
     {
-        static if (is(NormInt == NormalizedInt!T, T))
-            return NormInt(convertNormInt!T(value));
+        static if (is(NormInt == NormType))
+            return this;
         else
-            static assert(false, "Shouldn't be possible!");
+        {
+            static if (is(NormInt == NormalizedInt!(T, b), T, uint b))
+                return NormInt(cast(T)convertNormBits!(bits, isSigned!I, b, isSigned!T, Unsigned!T, Unsigned!I)(value));
+            else
+                static assert(false, "Shouldn't be possible!");
+        }
     }
 
     /** Floating point cast operator. */
     F opCast(F)() const if (isFloatingPoint!F)
     {
-        return normIntToFloat!F(value);
+        return normIntToFloat!(F, bits)(value);
     }
 }
 
@@ -263,6 +270,25 @@ unittest
     w *= 2;                              assert(w == -32767 && w == -1.0); // overflow saturates
     w *= -0.5;                           assert(w == 16384 && w > 0.5);    // 0.5 is not exactly representable (odd number of positive integers)
     w = w^^0.0;                          assert(w == 1.0);                 // pow as expected
+
+    // non-type aligned bits...
+    auto X = NormalizedInt!(ushort, 10)(800);
+    auto Y = NormalizedInt!(ushort, 10)(200);
+
+    auto Z = X + Y;                      assert(Z == 1000);                // add as expected
+    Z += Y;                              assert(Z == 1023);                // overflow saturates
+                                         assert(cast(float)Z == 1.0);      // maximum value is floating point 1.0
+    Z -= X;                              assert(Z == 223);                 // subtract as expected
+    Z -= X;                              assert(Z == 0);                   // underflow saturates
+    Z = Y * 2;                           assert(Z == 400);                 // multiply by integer
+    Z = X * 0.5;                         assert(Z == 400);                 // multiply by float
+    Z *= 3;                              assert(Z == 1023);                // multiply overflow saturates
+    Z *= Y;                              assert(Z == 200);                 // multiply is performed in normalized space
+    Z *= Y;                              assert(Z == 39);                  // multiplication rounds *down*
+    Z /= 2;                              assert(Z == 19);                  // division works as expected, rounds down
+    Z /= Y;                              assert(Z == 97);                  // division is performed in normalized space
+    Z /= Y * Y;                          assert(Z == 1023);                // division overflow saturates
+    Z = -Z;                              assert(Z == 0);                   // unsigned negation saturates at zero
 
     // check floating poing comparisons
     static assert(NormalizedInt!ubyte(0xFF) == 1.0);
@@ -314,25 +340,27 @@ unittest
 }
 
 /** Convert a float to a normalized integer. */
-To floatToNormInt(To, From)(From f) if (isFloatingPoint!From && isIntegral!To)
+To floatToNormInt(To, uint bits, From)(From f) if (isFloatingPoint!From && isIntegral!To)
 {
-    return cast(To)floatToNormBits!(To.sizeof*8, isSigned!To, Unsigned!To)(f);
+    static assert(bits <= To.sizeof*8);
+    return cast(To)floatToNormBits!(bits, isSigned!To, Unsigned!To)(f);
 }
 ///
 unittest
 {
-    static assert(floatToNormInt!ubyte(0.5) == 0x80);
+    static assert(floatToNormInt!(ubyte, 8)(0.5) == 0x80);
 }
 
 /** Convert a normalized integer to a float. */
-To normIntToFloat(To, From)(From i) if (isIntegral!From && isFloatingPoint!To)
+To normIntToFloat(To, uint bits, From)(From i) if (isIntegral!From && isFloatingPoint!To)
 {
-    return normBitsToFloat!(From.sizeof*8, isSigned!From, To)(cast(Unsigned!From)i);
+    static assert(bits <= From.sizeof*8);
+    return normBitsToFloat!(bits, isSigned!From, To)(cast(Unsigned!From)i);
 }
 ///
 unittest
 {
-    static assert(normIntToFloat!(double, ubyte)(0xFF) == 1.0);
+    static assert(normIntToFloat!(double, 8, ubyte)(0xFF) == 1.0);
 }
 
 package:
@@ -890,6 +918,6 @@ unittest
 }
 
 // the phobos implementations are literally insane!!
-T _min(T)(T a, T b) { return a < b ? a : b; }
-T _max(T)(T a, T b) { return a > b ? a : b; }
-T _clamp(T)(T v, T min, T max) { return v < min ? min : v > max ? max : v; }
+pragma(inline, true) T _min(T)(T a, T b) { return a < b ? a : b; }
+pragma(inline, true) T _max(T)(T a, T b) { return a > b ? a : b; }
+pragma(inline, true) T _clamp(T)(T v, T min, T max) { return v < min ? min : v > max ? max : v; }

@@ -358,7 +358,7 @@ enum char[] ComponentName = [ 'r', 'g', 'b', 'a', 'l', 'e', 'x' ];
 template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
 {
     static if (format == RGBFormatDescriptor.Format.NormInt || format == RGBFormatDescriptor.Format.SignedNormInt)
-        alias TypeFor = NormalizedInt!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedNormInt));
+        alias TypeFor = NormalizedInt!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedNormInt), bits);
     else static if (format == RGBFormatDescriptor.Format.FloatingPoint)
         alias TypeFor = FloatForSize!bits;
     else static if (format == RGBFormatDescriptor.Format.UnsignedInt || format == RGBFormatDescriptor.Format.SignedInt)
@@ -373,28 +373,28 @@ template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
 
 template IntForSize(size_t size, bool signed)
 {
-    static if (size == 8)
+    static if (size <= 8)
     {
         static if (signed)
             alias IntForSize = byte;
         else
             alias IntForSize = ubyte;
     }
-    else static if (size == 16)
+    else static if (size <= 16)
     {
         static if (signed)
             alias IntForSize = short;
         else
             alias IntForSize = ushort;
     }
-    else static if (size == 32)
+    else static if (size <= 32)
     {
         static if (signed)
             alias IntForSize = int;
         else
             alias IntForSize = uint;
     }
-    else static if (size == 64)
+    else static if (size <= 64)
     {
         static if (signed)
             alias IntForSize = long;
