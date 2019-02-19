@@ -51,29 +51,26 @@ struct RGBFormatDescriptor
         ///
         SignedInt,
         ///
-        Mantissa,
+        Exponent,
         ///
-        Exponent
+        Mantissa
     }
 
     ///
     enum Flags : ushort
     {
         ///
-        ComponentPresentMask = 0x7F,
-
+        AnyFloating     = 1 << 0,
         ///
-        AnyFloating     = 1 << 10,
+        AllFloating     = 1 << 1,
         ///
-        AllFloating     = 1 << 11,
+        AllSameFormat   = 1 << 2,
         ///
-        AllSameFormat   = 1 << 12,
+        AllSameSize     = 1 << 3,
         ///
-        AllSameSize     = 1 << 13,
+        AllAligned      = 1 << 4,
         ///
-        AllAligned      = 1 << 14,
-        ///
-        BigEndian       = 1 << 15
+        BigEndian       = 1 << 5
     }
 
     ///
@@ -84,26 +81,36 @@ struct RGBFormatDescriptor
         ///
         Format format = Format.NormInt;
         ///
-        ubyte bits = 8;
+        ubyte offset = 0;
+        ///
+        ubyte bits = 0;
         ///
         ubyte fracBits = 0;
-        // TODO: find bits for float sign, or custom exponent bias?
+        ///
+        byte expBias = 0;
     }
 
     ///
-    byte bits;
+    ubyte bits;
     ///
-    byte alignment;
+    ubyte alignment;
     ///
-    ushort flags;
+    ubyte numComponents;
+    ///
+    ubyte flags;
 
-    ///
-    ComponentDesc[] components;
+    byte[6] componentIndex;
+    ComponentDesc[5] componentData;
 
     ///
     const(char)[] colorSpace;
     ///
     const(char)[] userData;
+
+    ///
+    inout(ComponentDesc)[] components() return inout pure nothrow @nogc @safe { return componentData[0 .. numComponents]; }
+    ///
+    bool has(Component c) const pure nothrow @nogc @safe { return componentIndex[c] >= 0; }
 }
 
 /**
@@ -116,12 +123,10 @@ RGBFormatDescriptor parseRGBFormat(const(char)[] format) @trusted pure
     RGBFormatDescriptor r;
 
     // parse data into stack buffers
-    RGBFormatDescriptor.ComponentDesc[6] components = void;
-    string error = format.parseRGBFormat(r, components);
+    string error = format.parseRGBFormat(r);
     enforce(error == null, format ~ " : " ~ error);
 
     // dup components, colorSpace, and userData into gc buffers
-    r.components = r.components.dup;
     if (r.colorSpace.isSubString(format))
         r.colorSpace = r.colorSpace.idup;
     if (r.userData)
@@ -182,8 +187,7 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 {
     // parse data into stack buffers
     RGBFormatDescriptor r;
-    RGBFormatDescriptor.ComponentDesc[6] components = void;
-    string error = format.parseRGBFormat(r, components);
+    string error = format.parseRGBFormat(r);
     if (error)
         return null;
 
@@ -191,7 +195,6 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 
     // allocate a buffer sufficient for all the data
     size_t bufferSize = RGBFormatDescriptor.sizeof +
-                        RGBFormatDescriptor.ComponentDesc.sizeof*r.components.length +
                         (csNeedsAllocation ? r.colorSpace.length : 0) +
                         r.userData.length;
     void[] buffer = allocator.allocate(bufferSize);
@@ -200,11 +203,7 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
     RGBFormatDescriptor* fmt = cast(RGBFormatDescriptor*)buffer.ptr;
     *fmt = r;
 
-    // copy component data
-    fmt.components = (cast(RGBFormatDescriptor.ComponentDesc*)&fmt[1])[0 .. r.components.length];
-    fmt.components[] = r.components[];
-
-    char* userData = cast(char*)&fmt.components.ptr[fmt.components.length];
+    char* userData = cast(char*)&fmt[1];
 
     // copy the color space if it's not a standard
     if (csNeedsAllocation)
@@ -316,8 +315,7 @@ string canonicalFormat(const(char)[] format) @trusted pure
     import std.exception : enforce;
 
     RGBFormatDescriptor fmt;
-    RGBFormatDescriptor.ComponentDesc[6] components = void;
-    string error = format.parseRGBFormat(fmt, components);
+    string error = format.parseRGBFormat(fmt);
     enforce(error == null,"Invalid RGB format descriptor: " ~ format);
     // TODO: accept an output buffer...
     return makeFormatString(fmt);
@@ -339,7 +337,7 @@ unittest
 
 package:
 
-string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGBFormatDescriptor.ComponentDesc[6] components) @trusted pure nothrow @nogc
+string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format) @trusted pure nothrow @nogc
 {
     import wg.color.rgb.colorspace : RGBColorSpace, findRGBColorspace, parseRGBColorSpace;
 
@@ -368,22 +366,24 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
     ];
 
     // parse components
-    size_t numComponents = 0;
+    size_t numElements = 0;
+    Component[8] elementTypes;
+    bool hasSharedExponent = false;
     while (str.length && str[0] != '_')
     {
         char c = str[0];
-        if (numComponents == components.length)
+        if (numElements == elementTypes.length)
             return "Too many components in RGB color format";
         if (c < 'a' || c > 'z' || componentMap[c - 'a'] == 0xFF)
             return "Not an RGB color format";
         Component type = cast(Component)componentMap[c - 'a'];
-        if ((format.flags & (1 << type)) != 0)
+        if (type != Component.Unused && (format.flags & (1 << type)) != 0)
             return "Duplicate component types not allowed";
-        format.flags |= 1 << type;
-        components[numComponents++] = RGBFormatDescriptor.ComponentDesc(type);
+        elementTypes[numElements++] = type;
+        hasSharedExponent |= type == Component.Exponent;
         str = str[1 .. $];
     }
-    if (numComponents == 0)
+    if (numElements == 0)
         return "Not an RGB color format";
 
     // since the format section is hard to parse, we'll do it last...
@@ -442,7 +442,8 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
     if (!format.colorSpace)
         format.colorSpace = "sRGB";
 
-    // parse format data...
+    // parse/process components...
+    format.componentIndex[] = -1;
     if (str.length > 0)
     {
         import wg.util.parse : parseInt;
@@ -450,77 +451,130 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
         // TODO: handle block-compression formats...
 
         // no block compression
-        for (size_t i = 0; i < numComponents; ++i)
+        ubyte offset = 0;
+        ubyte numComponents = 0;
+        for (size_t i = 0; i < numElements; ++i)
         {
             if (str.length < 2 || str[0] != '_')
                 return "Invalid format string";
+            if (numComponents >= RGBFormatDescriptor.componentData.length)
+                return "RGB formats may have a maximum of 5 components";
+
+            RGBFormatDescriptor.ComponentDesc component = RGBFormatDescriptor.ComponentDesc(elementTypes[i]);
 
             // check if the type is qualified
             switch (str[1])
             {
-                case 's': components[i].format = Format.SignedNormInt;  goto skipTwo;
-                case 'f': components[i].format = Format.FloatingPoint;  goto skipTwo;
-                case 'u': components[i].format = Format.UnsignedInt;    goto skipTwo;
-                case 'i': components[i].format = Format.SignedInt;      goto skipTwo;
+                case 's': component.format = Format.SignedNormInt;  goto skipTwo;
+                case 'f': component.format = Format.FloatingPoint;  goto skipTwo;
+                case 'u': component.format = Format.UnsignedInt;    goto skipTwo;
+                case 'i': component.format = Format.SignedInt;      goto skipTwo;
                 skipTwo: str = str[2 .. $]; break;
                 default: str = str[1 .. $]; break;
             }
 
             // parse the component size
-            size_t taken = str.parseInt(components[i].bits);
+            size_t taken = str.parseInt(component.bits);
             if (!taken)
                 return "Invalid component descriptor";
-            if (components[i].bits == 0)
+            if (component.bits == 0)
                 return "Invalid component size: 0";
             str = str[taken .. $];
+
+            component.offset = offset;
+            offset += component.bits;
 
             // if it's fixed point
             if (str.length && str[0] == '.')
             {
                 // validate the format
-                if (components[i].format == Format.NormInt)
-                    components[i].format = Format.FixedPoint;
-                else if (components[i].format == Format.SignedNormInt)
-                    components[i].format = Format.SignedFixedPoint;
-                else if (components[i].format != Format.FloatingPoint)
+                if (component.format == Format.NormInt)
+                    component.format = Format.FixedPoint;
+                else if (component.format == Format.SignedNormInt)
+                    component.format = Format.SignedFixedPoint;
+                else if (component.format != Format.FloatingPoint)
                     return "Fractional components may only be unsigned, signed, or floating point (ie, `4.4`, `s4.4` or `f3.7`)";
 
                 // parse the fractional size
-                taken = str[1 .. $].parseInt(components[i].fracBits);
+                taken = str[1 .. $].parseInt(component.fracBits);
                 if (!taken)
                     return "Invalid component descriptor";
-                if (components[i].fracBits == 0)
+                if (component.fracBits == 0)
                     return "Invalid fractional bits: 0";
-                components[i].bits += components[i].fracBits;
+                component.bits += component.fracBits;
                 str = str[1 + taken .. $]; // include the '.'
             }
 
-            // if it has a shared exponent, then assert the rules
-            if ((format.flags & (1 << Component.Exponent)) != 0)
+            // skip unused components
+            if (elementTypes[i] == Component.Unused)
             {
-                if (components[i].format != Format.NormInt)
-                    return "Shared exponent formats may not have qualified component types";
-                components[i].format = components[i].type == Component.Exponent ? Format.Exponent : Format.Mantissa;
+                if (component.format != Format.NormInt)
+                    return "Unused ('x') components may not have qualified component type";
+                continue;
             }
+
+            // if it has a shared exponent, then assert the rules
+            if (hasSharedExponent)
+            {
+                if (component.format != Format.NormInt)
+                    return "Shared exponent formats may not have qualified component types";
+                component.format = component.type == Component.Exponent ? Format.Exponent : Format.Mantissa;
+            }
+
+            // write component
+            format.componentIndex[elementTypes[i]] = numComponents;
+            format.componentData[numComponents++] = component;
         }
+        format.numComponents = numComponents;
+
         if (str.length)
             return "Invalid RGB format string";
+    }
+    else
+    {
+        ubyte offset = 0;
+        ubyte numComponents = 0;
+        for (size_t i = 0; i < numElements; ++i)
+        {
+            if (numComponents >= RGBFormatDescriptor.componentData.length)
+                return "RGB formats may have a maximum of 5 components";
+
+            if (elementTypes[i] != Component.Unused)
+            {
+                format.componentData[numComponents].type = elementTypes[i];
+                format.componentData[numComponents].format = Format.NormInt;
+                format.componentData[numComponents].offset = offset;
+                format.componentData[numComponents].bits = 8;
+                format.componentIndex[elementTypes[i]] = numComponents++;
+            }
+
+            offset += 8;
+        }
+        format.numComponents = numComponents;
     }
 
     // prep the detail data...
     bool allAligned = true;
-    ubyte sameSize = components[0].bits;
+    ubyte sameSize = format.componentData[0].bits;
     bool sameFormat = true;
     uint numFloating = 0;
-    foreach (ref c; components[0 .. numComponents])
+    foreach (ref c; format.components)
     {
         format.bits += c.bits;
         allAligned = allAligned && isAlignedType(c.bits);
         sameSize = c.bits == sameSize ? sameSize : 0;
-        sameFormat = sameFormat && c.format == components[0].format;
+        sameFormat = sameFormat && c.format == format.componentData[0].format;
         numFloating += c.format == Format.FloatingPoint ? 1 : 0;
+        if (c.format == Format.FloatingPoint && c.fracBits == 0)
+        {
+            if (c.bits < 10)
+                return "Tiny floats must specifiy mantissa bits (ie, `f3.5`)";
+            // we'll guess that packed floats have 5-bit exponent (all common small-floats use 5bit exponent)
+            // we'll also guess that floats < 16bits are unsigned for now (format should be able to specify)
+//            c.fracBits = cast(ubyte)(c.bits - 5 - (c.bits >= 16));
+        }
     }
-    if ((format.flags & (1 << Component.Exponent)) != 0)
+    if (hasSharedExponent)
     {
         format.alignment = format.bits;
         format.flags |= Flags.AnyFloating | Flags.AllFloating;
@@ -528,11 +582,10 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
     else
     {
         format.alignment = allAligned && sameSize != 0 ? sameSize : format.bits;
-        if (numFloating == numComponents)
+        if (numFloating == format.numComponents)
             format.flags |= Flags.AnyFloating | Flags.AllFloating;
         else if (numFloating > 0)
             format.flags |= Flags.AnyFloating;
-
     }
     if (allAligned)
         format.flags |= Flags.AllAligned;
@@ -540,10 +593,8 @@ string parseRGBFormat(const(char)[] str, out RGBFormatDescriptor format, ref RGB
         format.flags |= Flags.AllSameSize;
     if (sameFormat)
         format.flags |= Flags.AllSameFormat;
-    if ((format.flags & (1 << Component.Luma)) != 0 && (format.flags & 0x7) != 0)
+    if (format.has(Component.Luma) && (format.has(Component.Red) || format.has(Component.Green) || format.has(Component.Blue)))
         return "RGB colors may not have both 'r/g/b' and 'l' channels";
-
-    format.components = components[0 .. numComponents];
 
     return null;
 }
