@@ -1,21 +1,27 @@
-module wg.format.bmp;
+// Written in the D programming language.
+/**
+A very basic BMP file format reader/writer.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.format.bmp;
 import wg.image.imagebuffer;
 import wg.image.metadata;
 import wg.util.allocator;
 
-
 /**
- * Format an image into a BMP image buffer.
- */
+Format an image into a BMP image buffer.
+*/
 void[] writeBMP(ref const(ImageBuffer) image)
 {
     return writeBMP(image, getGcAllocator());
 }
 
 /**
- * Format an image into a BMP image buffer.
- */
+Format an image into a BMP image buffer.
+*/
 void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nogc
 {
     import wg.color.rgb.format : RGBFormatDescriptor, parseRGBFormat;
@@ -136,11 +142,12 @@ void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nog
     return bmp;
 }
 
-
+///
 struct BMPImage
 {
     void[] data;
 
+    ///
     this(void[] image)
     {
         data = image;
@@ -161,11 +168,13 @@ struct BMPImage
         }
     }
 
+    ///
     BMPFileHeader* header() const
     {
         return cast(BMPFileHeader*)&data[0];
     }
 
+    ///
     int bmpVersion(const(ubyte)** palette = null) const
     {
         if (*cast(ushort*)&data[0] == 0)
@@ -191,6 +200,7 @@ struct BMPImage
         }
     }
 
+    ///
     const(Info)* infoHeader(Info)() const
     {
         static if (is(Info == BMPInfoV1))
@@ -199,6 +209,7 @@ struct BMPImage
             return cast(const(Info)*)(header() + 1);
     }
 
+    ///
     const(void)[] iccData() const
     {
         if (bmpVersion() < 5)
@@ -207,6 +218,7 @@ struct BMPImage
         return (cast(void*)info + info.profileData)[0 .. info.profileSize];
     }
 
+    ///
     inout(ImageBuffer) getImage() inout
     {
         import wg.util.format : formatInt, formatReal;
@@ -637,12 +649,12 @@ struct BMPFileHeader
 
 struct BMPInfoV1
 {
-	ushort type;
-	ushort width;
-	ushort height;
-	ushort byteWidth;
-	ubyte planes;
-	ubyte bitsPerPixel;
+    ushort type;
+    ushort width;
+    ushort height;
+    ushort byteWidth;
+    ubyte planes;
+    ubyte bitsPerPixel;
 }
 
 struct BMPInfoV2

@@ -10,19 +10,19 @@ conversions.
 
 Authors:    Manu Evans
 Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
 module wg.color.xyz;
-
 import wg.util.parse : skipWhite, parseReal;
 
 /**
- * Determine if T is an XYZ color type.
- */
+Determine if T is an XYZ color type.
+*/
 enum IsXYZ(T) = is(T == XYZ) || is(T == xyY);
 
 /**
- * Get the format string for an XYZ or xyY color type.
- */
+Get the format string for an XYZ or xyY color type.
+*/
 template FormatString(T) if (is(T == XYZ) || is(T == xyY))
 {
     static if (is(T == XYZ))
@@ -32,41 +32,41 @@ template FormatString(T) if (is(T == XYZ) || is(T == xyY))
 }
 
 /**
- * A CIE 1931 XYZ color.
- */
+A CIE 1931 XYZ color.
+*/
 struct XYZ
 {
 @safe pure nothrow @nogc:
 
-    /** X value. */
+    /// X value.
     float X = 0;
-    /** Y value. */
+    /// Y value.
     float Y = 0;
-    /** Z value. */
+    /// Z value.
     float Z = 0;
 }
 
 /**
- * A CIE 1931 xyY color.
- */
+A CIE 1931 xyY color.
+*/
 struct xyY
 {
 @safe pure nothrow @nogc:
     alias ParentColor = XYZ;
 
-    /** x coordinate. */
+    /// x coordinate.
     float x = 0;
-    /** y coordinate. */
+    /// y coordinate.
     float y = 0;
-    /** Y value (luminance). */
+    /// Y value (luminance).
     float Y = 0;
 }
 
-
-// TODO: should this be in `wg/color/xyz/parse.d`?
 /**
- * Parse XYZ/xyY color from string.
- */
+Parse XYZ/xyY color from string.
+
+TODO: should this be in `wg/color/xyz/parse.d`?
+*/
 XYZType parseXYZ(XYZType)(const(char)[] str) @safe pure
     if (is(XYZType == XYZ) || is(XYZType == xyY))
 {
@@ -78,8 +78,8 @@ XYZType parseXYZ(XYZType)(const(char)[] str) @safe pure
 }
 
 /**
- * Parse XYZ/xyY color from string.
- */
+Parse XYZ/xyY color from string.
+*/
 size_t parseXYZ(XYZType)(const(char)[] str, out XYZType color) @trusted pure nothrow @nogc
     if (is(XYZType == XYZ) || is(XYZType == xyY))
 {

@@ -1,3 +1,11 @@
+// Written in the D programming language.
+/**
+Image definition.
+
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.image;
 
 public import wg.color;
@@ -7,22 +15,25 @@ import wg.image.format;
 import wg.image.metadata;
 import wg.util.allocator;
 
-
-enum isImage(T) = true; // does T look like an image?
-enum isValidPixelType(T) = true; // is T a valid image element type?
+/// does T look like an image?
+enum isImage(T) = true;
+/// is T a valid image element type?
+enum isValidPixelType(T) = true;
 
 /**
- * Strong typed wrapper for ImageBuffer.
- * It will confirm the formats are matching once at construction, and any further 
- * runtime metadata checks can be handled by the type-checker.
- */
+Strong typed wrapper for ImageBuffer.
+It will confirm the formats are matching once at construction, and any further
+runtime metadata checks can be handled by the type-checker.
+*/
 struct Image(ElementType)
 {
     static assert(isValidPixelType!ElementType, "Image must have a valid element type!");
 
     alias buffer this; // ???
+    ///
     ref inout(ImageBuffer) buffer() inout { return img; }
 
+    ///
     this(ref ImageBuffer image)
     {
         assert(image.pixelFormat.asDString[] == FormatForPixelType!ElementType[]);
@@ -30,6 +41,7 @@ struct Image(ElementType)
         img = image;
     }
 
+    ///
     inout(ElementType)[] row(uint y) inout pure nothrow @nogc @trusted
     {
         assert(y < height);
@@ -37,6 +49,7 @@ struct Image(ElementType)
         return cast(ElementType[])img.data[offset .. offset + img.width*ElementType.sizeof];
     }
 
+    ///
     ref inout(ElementType) at(uint x, uint y) inout pure nothrow @nogc @trusted
     {
         assert(x < width && y < height);
@@ -49,8 +62,8 @@ package:
 }
 
 /**
- * Create an image buffer from an array of pixel data.
- */
+Create an image buffer from an array of pixel data.
+*/
 Image!ElementType asImage(ElementType)(ElementType[] data, uint width, uint height) pure nothrow @nogc @safe if (isValidPixelType!ElementType)
 {
     assert(data.length == width * height);
@@ -67,9 +80,9 @@ Image!ElementType asImage(ElementType)(ElementType[] data, uint width, uint heig
 alias allocImage = wg.image.imagebuffer.allocImage;
 
 /**
- * Allocate an image of given type in GC memory.
- * Optionally allocate additional metadata pages.
- */
+Allocate an image of given type in GC memory.
+Optionally allocate additional metadata pages.
+*/
 Image!ElementType allocImage(ElementType = RGBX8, MetadataBlocks...)(uint width, uint height, size_t[] additionalMetadataBytes...)
 {
     import std.exception : enforce;
@@ -84,9 +97,9 @@ Image!ElementType allocImage(ElementType = RGBX8, MetadataBlocks...)(uint width,
 }
 
 /**
- * Allocate an image of given type using the supplied allocator.
- * Optionally allocate additional metadata pages.
- */
+Allocate an image of given type using the supplied allocator.
+Optionally allocate additional metadata pages.
+*/
 Image!ElementType allocImage(ElementType = RGBX8, MetadataBlocks...)(uint width, uint height, Allocator* allocator, size_t[] additionalMetadataBytes...) nothrow @nogc
 {
     assert(additionalMetadataBytes.length == MetadataBlocks.length);

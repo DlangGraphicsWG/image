@@ -1,23 +1,35 @@
-module wg.image.metadata;
+// Written in the D programming language.
+/**
+Metadata that is associated with an image buffer.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.image.metadata;
 import wg.image.imagebuffer;
 import wg.util.allocator;
 
 /**
- * Image metadata header structure.
- */
+Image metadata header structure.
+*/
 struct MetaData
 {
+    ///
     char[4] magic;
+    ///
     uint bytes;
+    ///
     MetaData* next;
 
+    ///
     @property inout(void)[] data() inout return @trusted pure nothrow @nogc
     {
         // null? ie, bytes == 0? yes
         return (cast(inout(void)*)&this)[typeof(this).sizeof .. typeof(this).sizeof + bytes];
     }
 
+    ///
     @property inout(MDType)* data(MDType)() inout return @trusted pure nothrow @nogc
     {
         assert(magic == MDType.ID && bytes >= MDType.sizeof);
@@ -27,8 +39,8 @@ struct MetaData
 
 
 /**
- * Find metadata structure in image by id.
- */
+Find metadata structure in image by id.
+*/
 inout(void)[] getMetadata(ref inout(ImageBuffer) image, const(char)[4] id) @safe pure nothrow @nogc
 {
     inout(MetaData)* md = image.metadata;
@@ -42,8 +54,8 @@ inout(void)[] getMetadata(ref inout(ImageBuffer) image, const(char)[4] id) @safe
 }
 
 /**
- * Find metadata in image by type.
- */
+Find metadata in image by type.
+*/
 inout(MDType)* getMetadata(MDType)(ref inout(ImageBuffer) image) @trusted pure nothrow @nogc
 {
     inout(void)[] md = image.getMetadata(MDType.ID);
@@ -54,8 +66,8 @@ inout(MDType)* getMetadata(MDType)(ref inout(ImageBuffer) image) @trusted pure n
 }
 
 /**
-* Find or create metadata structure in an image buffer by type.
-* If the metadata exists but is smaller than requested `additionalBytes`, it is re-allocated.
+Find or create metadata structure in an image buffer by type.
+If the metadata exists but is smaller than requested `additionalBytes`, it is re-allocated.
 */
 MDType* getOrInsertMetadata(MDType)(ref ImageBuffer image, size_t additionalBytes = 0)
 {
@@ -66,8 +78,8 @@ MDType* getOrInsertMetadata(MDType)(ref ImageBuffer image, size_t additionalByte
 }
 
 /**
-* Find or create metadata structure in an image buffer by type.
-* If the metadata exists but is smaller than requested `additionalBytes`, it is re-allocated.
+Find or create metadata structure in an image buffer by type.
+If the metadata exists but is smaller than requested `additionalBytes`, it is re-allocated.
 */
 MDType* getOrInsertMetadata(MDType)(ref ImageBuffer image, Allocator* allocator, size_t additionalBytes = 0) nothrow @nogc
 {
@@ -78,9 +90,9 @@ MDType* getOrInsertMetadata(MDType)(ref ImageBuffer image, Allocator* allocator,
 }
 
 /**
- * Insert new metadata structure into an image buffer by type.
- * If the metadata struct is already present, it is re-allocated.
- */
+Insert new metadata structure into an image buffer by type.
+If the metadata struct is already present, it is re-allocated.
+*/
 MDType* insertMetadata(MDType)(ref ImageBuffer image, size_t additionalBytes = 0)
 {
     MetaData* md = cast(MetaData*)(new void[getMetadataSize!(false, MDType)(additionalBytes)]).ptr;
@@ -91,9 +103,9 @@ MDType* insertMetadata(MDType)(ref ImageBuffer image, size_t additionalBytes = 0
 }
 
 /**
- * Insert new metadata structure into an image buffer by type.
- * If the metadata struct is already present, it is re-allocated.
- */
+Insert new metadata structure into an image buffer by type.
+If the metadata struct is already present, it is re-allocated.
+*/
 MDType* insertMetadata(MDType)(ref ImageBuffer image, Allocator* allocator, size_t additionalBytes = 0) nothrow @nogc
 {
     AllocationMetadata* allocData = image.getMetadata!AllocationMetadata();
@@ -149,21 +161,25 @@ MDType* insertMetadata(MDType)(ref ImageBuffer image, Allocator* allocator, size
 
 
 /**
- * Common metadata struct.
- */
+Common metadata struct.
+*/
 struct CommonMetadata
 {
+    ///
     enum char[4] ID = "META";
 
-    float pixelAspect = 1.0f; // defined as w/h; animorphic images > 1.0
-    float horizDpi = 0; // image has no associated physical units
+    /// defined as w/h; animorphic images > 1.0
+    float pixelAspect = 1.0f;
+    /// image has no associated physical units
+    float horizDpi = 0;
 
+    ///
     float[2] getDPI() const @safe pure nothrow @nogc { return [ horizDpi, horizDpi / pixelAspect ]; }
 }
 
 /**
- * Get the pixel aspect ratio for an image.
- */
+Get the pixel aspect ratio for an image.
+*/
 float getPixelAspect(ref const(ImageBuffer) image) @safe pure nothrow @nogc
 {
     auto md = image.getMetadata!CommonMetadata();
@@ -171,8 +187,8 @@ float getPixelAspect(ref const(ImageBuffer) image) @safe pure nothrow @nogc
 }
 
 /**
- * Get the display aspect ratio for an image.
- */
+Get the display aspect ratio for an image.
+*/
 float getAspectRatio(ref const(ImageBuffer) image) @safe pure nothrow @nogc
 {
     return cast(float)image.width / cast(float)image.height * image.getPixelAspect();
@@ -180,21 +196,26 @@ float getAspectRatio(ref const(ImageBuffer) image) @safe pure nothrow @nogc
 
 
 /**
- * Allocation metadata struct.
- * Store ownership of allocations which can be used to clean-up allocated data.
- */
+Allocation metadata struct.
+Store ownership of allocations which can be used to clean-up allocated data.
+*/
 struct AllocationMetadata
 {
     import wg.util.allocator;
 
+    ///
     enum char[4] ID = "ALOC";
 
+    ///
     struct Page
     {
+        ///
         Allocator* allocator;
+        ///
         void[] mem;
     }
 
+    ///
     Page[] allocations;
 
     private bool isFull() const pure nothrow @nogc @safe

@@ -1,10 +1,11 @@
+// Written in the D programming language.
 /**
- This module defines and operates on RGB color spaces.
+This module defines and operates on RGB color spaces.
  
- Authors:    Manu Evans
- Copyright:  Copyright (c) 2016, Manu Evans.
- License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
- */
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2016-2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.color.rgb.colorspace;
 
 import wg.color.standard_illuminant;
@@ -17,36 +18,36 @@ import wg.util.traits : isFloatingPoint;
 
 
 /**
- * Parameters that define an RGB color space.$(BR)
- * $(D_INLINECODE F) is the float type that should be used for the colors and gamma functions.
- */
+Parameters that define an RGB color space.$(BR)
+$(D_INLINECODE F) is the float type that should be used for the colors and gamma functions.
+*/
 struct RGBColorSpace
 {
-    /** Color space identifier. */
+    /// Color space identifier.
     const(char)[] id;
 
-    /** Color space name. */
+    /// Color space name.
     string name;
 
-    /** Gamma compression technique. */
+    /// Gamma compression technique.
     const(char)[] gamma;
 
-    /** White point. */
+    /// White point.
     xyY white;
-    /** Red point. */
+    /// Red point.
     xyY red;
-    /** Green point. */
+    /// Green point.
     xyY green;
-    /** Blue point. */
+    /// Blue point.
     xyY blue;
 
-    /** RGB to XYZ conversion matrix. */
+    /// RGB to XYZ conversion matrix.
     float[3][3] rgbToXyz = [0, 0, 0];
 
-    /** XYZ to RGB conversion matrix. */
+    /// XYZ to RGB conversion matrix.
     float[3][3] xyzToRgb = [0, 0, 0];
 
-    /** Construct an RGB color space from primaries and whitepoint. */
+    /// Construct an RGB color space from primaries and whitepoint.
     this()(const(char)[] id, string name, const(char)[] gamma, auto ref xyY white, auto ref xyY red, auto ref xyY green, auto ref xyY blue) pure nothrow @nogc @safe
     {
         this.id = id;
@@ -64,8 +65,8 @@ struct RGBColorSpace
 }
 
 /**
- * Pair of gamma functions.
- */
+Pair of gamma functions.
+*/
 struct GammaFuncPair(F) if (isFloatingPoint!F)
 {
     /** Gamma conversion function type. */
@@ -81,8 +82,8 @@ struct GammaFuncPair(F) if (isFloatingPoint!F)
 }
 
 /**
- * Pair of named gamma functions from string.
- */
+Pair of named gamma functions from string.
+*/
 struct GammaFuncPair(const(char)[] func, F = float) if (isFloatingPoint!F)
 {
     enum name = func;
@@ -118,29 +119,31 @@ struct GammaFuncPair(const(char)[] func, F = float) if (isFloatingPoint!F)
         static assert(false, "Function is not a named gamma function or a gamma power");
 }
 
-/** Linear to gamma transfer function. */
+/// Linear to gamma transfer function.
 T linearToGamma(double gamma, T)(T v) if (isFloatingPoint!T)
 {
     return v^^T(1.0/gamma);
 }
-/** Linear to gamma transfer function. */
+
+/// Linear to gamma transfer function.
 T linearToGamma(T)(T v, T gamma) if (isFloatingPoint!T)
 {
     return v^^T(1.0/gamma);
 }
 
-/** Gamma to linear transfer function. */
+/// Gamma to linear transfer function.
 T gammaToLinear(double gamma, T)(T v) if (isFloatingPoint!T)
 {
     return v^^T(gamma);
 }
-/** Gamma to linear transfer function. */
+
+/// Gamma to linear transfer function.
 T gammaToLinear(T)(T v, T gamma) if (isFloatingPoint!T)
 {
     return v^^T(gamma);
 }
 
-/** Linear to hybrid linear-gamma transfer function. The function and parameters are detailed in the example below. */
+/// Linear to hybrid linear-gamma transfer function. The function and parameters are detailed in the example below.
 T linearToHybridGamma(double a, double b, double s, double e, T)(T v) if (isFloatingPoint!T)
 {
     if (v <= T(b))
@@ -148,6 +151,7 @@ T linearToHybridGamma(double a, double b, double s, double e, T)(T v) if (isFloa
     else
         return T(a)*v^^T(e) - T(a - 1);
 }
+
 ///
 unittest
 {
@@ -170,7 +174,7 @@ unittest
     assert(abs(v - linearToHybridGamma!(a, b, s, e)(0.5)) < double.epsilon);
 }
 
-/** Hybrid linear-gamma to linear transfer function. The function and parameters are detailed in the example below. */
+/// Hybrid linear-gamma to linear transfer function. The function and parameters are detailed in the example below.
 T hybridGammaToLinear(double a, double b, double s, double e, T)(T v) if (isFloatingPoint!T)
 {
     if (v <= T(b*s))
@@ -178,6 +182,7 @@ T hybridGammaToLinear(double a, double b, double s, double e, T)(T v) if (isFloa
     else
         return ((v + T(a - 1)) * T(1/a))^^T(e);
 }
+
 ///
 unittest
 {
@@ -201,9 +206,9 @@ unittest
 }
 
 /**
- * RGB to XYZ color space transformation matrix.$(BR)
- * $(D_INLINECODE cs) describes the source RGB color space.
- */
+RGB to XYZ color space transformation matrix.$(BR)
+$(D_INLINECODE cs) describes the source RGB color space.
+*/
 float[3][3] rgbToXyzMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY blue, auto ref xyY white) pure nothrow @nogc @safe
 {
     import wg.color.xyz : XYZ;
@@ -231,9 +236,9 @@ float[3][3] rgbToXyzMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY 
 }
 
 /**
- * XYZ to RGB color space transformation matrix.$(BR)
- * $(D_INLINECODE cs) describes the target RGB color space.
- */
+XYZ to RGB color space transformation matrix.$(BR)
+$(D_INLINECODE cs) describes the target RGB color space.
+*/
 float[3][3] xyzToRgbMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY blue, auto ref xyY white) pure nothrow @nogc @safe
 {
     import wg.util.math : inverse;
@@ -242,8 +247,8 @@ float[3][3] xyzToRgbMatrix()(auto ref xyY red, auto ref xyY green, auto ref xyY 
 }
 
 /**
- * Find an RGB color space by name.
- */
+Find an RGB color space by name.
+*/
 immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @nogc
 {
     foreach (ref a; csAliases)
@@ -262,18 +267,21 @@ immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @no
     return null;
 }
 
+///
 float toMonochrome(alias cs)(float r, float g, float b) pure
 {
     return cs.red.Y*r + cs.green.Y*g + cs.blue.Y*b;
 }
+
+///
 float toGrayscale(const(RGBColorSpace) cs, T, U, V)(T r, U g, V b) pure
 {
     return toGrayscale!cs(cast(float)r, cast(float)g, cast(float)b);
 }
 
 /**
- * Parse RGB color space from string.
- */
+Parse RGB color space from string.
+*/
 RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
 {
     import std.exception : enforce;
@@ -290,8 +298,8 @@ RGBColorSpace parseRGBColorSpace(const(char)[] str) @trusted pure
 }
 
 /**
- * Parse RGB color space from string.
- */
+Parse RGB color space from string.
+*/
 RGBColorSpace* parseRGBColorSpace(const(char)[] str, Allocator* allocator) @trusted nothrow @nogc
 {
     RGBColorSpace r;
@@ -324,8 +332,8 @@ RGBColorSpace* parseRGBColorSpace(const(char)[] str, Allocator* allocator) @trus
 }
 
 /**
- * Parse white point from string.
- */
+Parse white point from string.
+*/
 xyY parseWhitePoint(const(char)[] whitePoint) @trusted pure
 {
     import std.exception : enforce;
@@ -336,8 +344,8 @@ xyY parseWhitePoint(const(char)[] whitePoint) @trusted pure
 }
 
 /**
- * Parse white point from string.
- */
+Parse white point from string.
+*/
 size_t parseWhitePoint(const(char)[] whitePoint, out xyY color) @trusted pure nothrow @nogc
 {
     import wg.color.xyz : parseXYZ;
@@ -355,7 +363,6 @@ size_t parseWhitePoint(const(char)[] whitePoint, out xyY color) @trusted pure no
 
     return whitePoint.length;
 }
-
 
 package:
 

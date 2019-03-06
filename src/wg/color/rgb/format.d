@@ -1,70 +1,114 @@
-module wg.color.rgb.format;
+// Written in the D programming language.
+/**
+RGB colorspaces format descriptor.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.color.rgb.format;
 import wg.util.allocator;
 
 /**
- * RGB format descriptor.
- */
+RGB format descriptor.
+*/
 struct RGBFormatDescriptor
 {
+    ///
     enum Component : ubyte
     {
+        ///
         Red = 0,
+        ///
         Green,
+        ///
         Blue,
+        ///
         Alpha,
+        ///
         Luma,
+        ///
         Exponent,
+        ///
         Unused
     }
 
+    ///
     enum Format : ubyte
     {
+        ///
         NormInt,
+        ///
         SignedNormInt,
+        ///
         FloatingPoint,
+        ///
         FixedPoint,
+        ///
         SignedFixedPoint,
+        ///
         UnsignedInt,
+        ///
         SignedInt,
+        ///
         Mantissa,
+        ///
         Exponent
     }
 
+    ///
     enum Flags : ushort
     {
+        ///
         ComponentPresentMask = 0x7F,
 
+        ///
         AnyFloating     = 1 << 10,
+        ///
         AllFloating     = 1 << 11,
+        ///
         AllSameFormat   = 1 << 12,
+        ///
         AllSameSize     = 1 << 13,
+        ///
         AllAligned      = 1 << 14,
+        ///
         BigEndian       = 1 << 15
     }
 
+    ///
     struct ComponentDesc
     {
+        ///
         Component type;
+        ///
         Format format = Format.NormInt;
+        ///
         ubyte bits = 8;
+        ///
         ubyte fracBits = 0;
         // TODO: find bits for float sign, or custom exponent bias?
     }
 
+    ///
     byte bits;
+    ///
     byte alignment;
+    ///
     ushort flags;
 
+    ///
     ComponentDesc[] components;
 
+    ///
     const(char)[] colorSpace;
+    ///
     const(char)[] userData;
 }
 
 /**
- * Parse RGB format descriptor from string.
- */
+Parse RGB format descriptor from string.
+*/
 RGBFormatDescriptor parseRGBFormat(const(char)[] format) @trusted pure
 {
     import std.exception : enforce;
@@ -85,6 +129,7 @@ RGBFormatDescriptor parseRGBFormat(const(char)[] format) @trusted pure
 
     return r;
 }
+
 ///
 unittest
 {
@@ -131,8 +176,8 @@ unittest
 }
 
 /**
- * Parse RGB format descriptor from string.
- */
+Parse RGB format descriptor from string.
+*/
 RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) @trusted nothrow @nogc
 {
     // parse data into stack buffers
@@ -179,6 +224,7 @@ RGBFormatDescriptor* parseRGBFormat(const(char)[] format, Allocator* allocator) 
 
     return fmt;
 }
+
 ///
 unittest
 {
@@ -203,8 +249,8 @@ unittest
 }
 
 /**
- * Make format string from RGB format descriptor.
- */
+Make format string from RGB format descriptor.
+*/
 string makeFormatString(const(RGBFormatDescriptor) desc) @safe pure nothrow
 {
     import wg.util.format : formatInt;
@@ -263,7 +309,7 @@ string makeFormatString(const(RGBFormatDescriptor) desc) @safe pure nothrow
 }
 
 /**
-* Canonicalise RGB format string.
+Canonicalise RGB format string.
 */
 string canonicalFormat(const(char)[] format) @trusted pure
 {
@@ -276,6 +322,7 @@ string canonicalFormat(const(char)[] format) @trusted pure
     // TODO: accept an output buffer...
     return makeFormatString(fmt);
 }
+
 ///
 unittest
 {
@@ -289,7 +336,6 @@ unittest
     static assert(canonicalFormat("rgb_8_8_8_sRGB_BE_#data") == "rgb_BE_#data");
     static assert(canonicalFormat("rgba_10_10_10_2_sRGB@D50") == "rgba_10_10_10_2_sRGB@D50");
 }
-
 
 package:
 

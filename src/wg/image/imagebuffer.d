@@ -1,21 +1,34 @@
+// Written in the D programming language.
+/**
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.image.imagebuffer;
-
 import wg.image;
 import wg.image.metadata;
 import wg.util.allocator;
 
 /**
- * Struct to hold a buffer of image data.
- */
+Struct to hold a buffer of image data.
+*/
 struct ImageBuffer
 {
+    ///
     uint width, height;
+    ///
     uint rowPitch;
+    ///
     ubyte blockWidth = 1, blockHeight = 1;
+    ///
     ubyte bitsPerBlock;
+    ///
     ubyte reserved;
+    ///
     void* data;
+    ///
     const(char)* pixelFormat;
+    ///
     MetaData* metadata;
 
     // 40 bytes so far...
@@ -29,9 +42,9 @@ struct ImageBuffer
 
 
 /**
- * Allocate an image buffer for the specified format in GC memory.
- * Optionally allocate additional metadata pages.
- */
+Allocate an image buffer for the specified format in GC memory.
+Optionally allocate additional metadata pages.
+*/
 ImageBuffer allocImage(MetadataBlocks...)(const(char)[] format, uint width, uint height, size_t[] additionalMetadataBytes...)
 {
     import std.exception : enforce;
@@ -46,9 +59,9 @@ ImageBuffer allocImage(MetadataBlocks...)(const(char)[] format, uint width, uint
 }
 
 /**
- * Allocate an image buffer for the specified format using the supplied allocator.
- * Optionally allocate additional metadata pages.
- */
+Allocate an image buffer for the specified format using the supplied allocator.
+Optionally allocate additional metadata pages.
+*/
 ImageBuffer allocImage(MetadataBlocks...)(const(char)[] format, uint width, uint height, Allocator* allocator, size_t[] additionalMetadataBytes...) nothrow @nogc
 {
     assert(additionalMetadataBytes.length == MetadataBlocks.length);
@@ -65,8 +78,8 @@ ImageBuffer allocImage(MetadataBlocks...)(const(char)[] format, uint width, uint
 }
 
 /**
- * Free any allocations contained in an image buffer.
- */
+Free any allocations contained in an image buffer.
+*/
 void freeImage(ref ImageBuffer image) nothrow @nogc
 {
     AllocationMetadata* allocData = image.getMetadata!AllocationMetadata();
@@ -89,14 +102,14 @@ void freeImage(ref ImageBuffer image) nothrow @nogc
     image.metadata = null;
 }
 
-
+///
 inout(void)[] getRow(ref inout(ImageBuffer) image, uint y)
 {
     size_t offset = y*image.rowPitch;
     return image.data[offset .. offset + image.width*image.bitsPerBlock/8];
 }
 
-// don't call this function in a loop, for the love of god!!
+/// don't call this function in a loop, for the love of god!!
 inout(void)[] getPixel(ref inout(ImageBuffer) image, uint x, uint y)
 {
     debug assert((image.bitsPerBlock & 7) == 0);
@@ -106,7 +119,7 @@ inout(void)[] getPixel(ref inout(ImageBuffer) image, uint x, uint y)
 }
 
 
-// HACK
+// FIXME: HACK
 inout(char)[] asDString(inout(char)* cstr) pure nothrow @nogc @trusted
 {
     if (!cstr)
@@ -116,7 +129,6 @@ inout(char)[] asDString(inout(char)* cstr) pure nothrow @nogc @trusted
         ++len;
     return cstr[0 .. len];
 }
-
 
 package:
 

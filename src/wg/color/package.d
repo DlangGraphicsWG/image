@@ -1,22 +1,28 @@
-module wg.color;
+// Written in the D programming language.
+/**
+RGB color space.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.color;
 import wg.color.rgb;
 
+/// 24 bit RGB color type with 8 bits per channel.
+alias RGB8 = RGB!("rgb");
+/// 32 bit RGB color type with 8 bits per channel.
+alias RGBX8 = RGB!("rgbx");
+/// 32 bit RGB + alpha color type with 8 bits per channel.
+alias RGBA8 = RGB!("rgba");
 
-/** 24 bit RGB color type with 8 bits per channel. */
-alias RGB8 =    RGB!("rgb");
-/** 32 bit RGB color type with 8 bits per channel. */
-alias RGBX8 =   RGB!("rgbx");
-/** 32 bit RGB + alpha color type with 8 bits per channel. */
-alias RGBA8 =   RGB!("rgba");
-
-/** Floating point RGB color type. */
+/// Floating point RGB color type.
 alias RGBf32 = RGB!("rgb_f32_f32_f32");
-/** Floating point RGB + alpha color type. */
+/// Floating point RGB + alpha color type.
 alias RGBAf32 = RGB!("rgba_f32_f32_f32_f32");
 
 
-/** Set of colors defined by X11, adopted by the W3C, SVG, and other popular libraries. */
+/// Set of colors defined by X11, adopted by the W3C, SVG, and other popular libraries.
 enum Colors
 {
     aliceBlue            = RGB8(240,248,255), /// <font color=aliceBlue>&#x25FC;</font>
@@ -169,18 +175,18 @@ enum Colors
 }
 
 /**
- * Convert between _color types.
- * 
- * Conversion is always supported between any pair of valid _color types.
- * Colour types usually implement only direct conversion between their immediate 'parent' _color type.
- * In the case of distantly related colors, convertColor will follow a conversion path via
- * intermediate representations such that it is able to perform the conversion.
- * 
- * For instance, a conversion from HSV to Lab necessary follows the conversion path: HSV -> RGB -> XYZ -> Lab.
- * 
- * Params: color = A _color in some source format.
- * Returns: $(D_INLINECODE color) converted to the target format.
- */
+Convert between _color types.
+
+Conversion is always supported between any pair of valid _color types.
+Colour types usually implement only direct conversion between their immediate 'parent' _color type.
+In the case of distantly related colors, convertColor will follow a conversion path via
+ intermediate representations such that it is able to perform the conversion.
+
+For instance, a conversion from HSV to Lab necessary follows the conversion path: HSV -> RGB -> XYZ -> Lab.
+
+Params: color = A _color in some source format.
+Returns: $(D_INLINECODE color) converted to the target format.
+*/
 To convertColor(To, From)(From color) @safe pure nothrow @nogc
 {
     // cast along a conversion path to reach our target conversion
@@ -214,6 +220,7 @@ To convertColor(To, From)(From color) @safe pure nothrow @nogc
         }
     }
 }
+
 ///
 unittest
 {
@@ -223,7 +230,6 @@ unittest
     assert(RGBA8(0xFF, 0xFF, 0xFF, 0xFF).convertColor!xyY().convertColor!RGBA8() == RGBA8(0xFF, 0xFF, 0xFF, 0));
     assert(RGB8(0xFF, 0x80, 0x10).convertColor!RGBA8() == RGBA8(0xFF, 0x80, 0x10, 0x00));
 }
-
 
 private:
 
