@@ -1,5 +1,16 @@
+// Written in the D programming language.
+/**
+Math utility code.
+
+For internal use only.
+
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.util.math;
 
+///
 pragma(inline, true)
 F[3] multiply(F)(auto ref const F[3][3] m1, auto ref const F[3] v) @safe pure nothrow @nogc
 {
@@ -8,6 +19,7 @@ F[3] multiply(F)(auto ref const F[3][3] m1, auto ref const F[3] v) @safe pure no
              m1[2][0]*v[0] + m1[2][1]*v[1] + m1[2][2]*v[2] ];
 }
 
+///
 pragma(inline, true)
 F[3][3] multiply(F)(auto ref const F[3][3] m1, auto ref const F[3][3] m2) @safe pure nothrow @nogc
 {
@@ -22,6 +34,7 @@ F[3][3] multiply(F)(auto ref const F[3][3] m1, auto ref const F[3][3] m2) @safe 
               m1[2][0]*m2[0][2] + m1[2][1]*m2[1][2] + m1[2][2]*m2[2][2] ]];
 }
 
+///
 pragma(inline, true)
 F[3][3] transpose(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
 {
@@ -30,6 +43,7 @@ F[3][3] transpose(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
             [ m[0][2], m[1][2], m[2][2] ]];
 }
 
+///
 pragma(inline, true)
 F determinant(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
 {
@@ -38,6 +52,7 @@ F determinant(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
            m[0][2] * (m[1][0]*m[2][1] - m[1][1]*m[2][0]);
 }
 
+///
 F[3][3] inverse(F)(auto ref const F[3][3] m) @safe pure nothrow @nogc
 {
     F det = determinant(m);

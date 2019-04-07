@@ -1,3 +1,11 @@
+// Written in the D programming language.
+/**
+RGB the type.
+
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.color.rgb;
 
 public import wg.color.rgb.colorspace;
@@ -11,51 +19,55 @@ import std.typecons : tuple;
 import std.meta : AliasSeq;
 
 /**
- * Determine if T is an RGB color type.
- */
+Determine if T is an RGB color type.
+*/
 enum IsRGB(T) = is(T == RGB!fmt, string fmt);
 
 /**
- * Get the canonical format string for an RGB type.
- */
+Get the canonical format string for an RGB type.
+*/
 template FormatString(T) if (is(T == RGB!fmt, string fmt))
 {
     enum FormatString = makeFormatString(T.Format);
 }
 
 /**
- * RGB colour type.
- */
+RGB colour type.
+*/
 struct RGB(string format)
 {
-    // make the format data available
+    /// make the format data available
     enum Format = parseRGBFormat(format);
+    ///
     enum ColorSpace = parseRGBColorSpace(Format.colorSpace);
 
+    ///
     alias ParentColor = XYZ;
 
+    ///
     enum isOperable = (Format.flags & RGBFormatDescriptor.Flags.AllSameFormat) &&
                       (Format.flags & RGBFormatDescriptor.Flags.AllAligned) &&
                       (Format.flags & RGBFormatDescriptor.Flags.AllSameSize);
 
     static if (isOperable)
     {
-        // format can have hard members
+        /// format can have hard members
         alias ComponentType = TypeFor!(Format.components[0].format, Format.components[0].bits, Format.components[0].fracBits);
 
+        ///
         enum hasComponent(char c) = mixin("is(typeof(" ~ c ~ "))");
 
-        // the argument type used for construction and methods
+        /// the argument type used for construction and methods
         static if (isFloatingPoint!ComponentType)
             alias ArgType = ComponentType;
         else
             alias ArgType = ComponentType.IntType;
 
-        // mixin the color component struct members
+        /// mixin the color component struct members
         static foreach (c; Format.components)
             mixin(ComponentType.stringof ~ " " ~ ComponentName[c.type] ~ ';');
 
-        /** Construct a color from RGB and optional alpha values. */
+        /// Construct a color from RGB and optional alpha values.
         this(ArgType r, ArgType g, ArgType b, ArgType a = 0)
         {
             foreach (c; AliasSeq!('r','g','b','a'))
@@ -64,7 +76,7 @@ struct RGB(string format)
                 this.l = cast(ComponentType)toMonochrome!ColorSpace(cast(float)ComponentType(r), cast(float)ComponentType(g), cast(float)ComponentType(b));
         }
 
-        /** Construct a color from a luminance and optional alpha value. */
+        /// Construct a color from a luminance and optional alpha value.
         this(ArgType l, ArgType a = 0)
         {
             foreach (c; AliasSeq!('l','r','g','b'))
@@ -75,13 +87,15 @@ struct RGB(string format)
     }
     else
     {
-        // format needs bit-unpacking; components are properties
+        /// format needs bit-unpacking; components are properties
         pragma(msg, "TODO: fabricate properties for the bitpacked members...");
     }
 
-    /** Return the RGB tristimulus values as a tuple.
+    /**
+    Return the RGB tristimulus values as a tuple.
     These will always be ordered (R, G, B).
-    Any color channels not present will be 0. */
+    Any color channels not present will be 0.
+    */
     @property auto tristimulus() const
     {
         static if (hasComponent!'l')
@@ -97,6 +111,7 @@ struct RGB(string format)
             return tuple(r, g, b);
         }
     }
+
     ///
     unittest
     {
@@ -104,14 +119,17 @@ struct RGB(string format)
         static assert(RGB!"bgr"(255, 128, 10).tristimulus == tuple(NormalizedInt!ubyte(255), NormalizedInt!ubyte(128), NormalizedInt!ubyte(10)));
     }
 
-    /** Return the RGB tristimulus values + alpha as a tuple.
-    These will always be ordered (R, G, B, A). */
+    /**
+    Return the RGB tristimulus values + alpha as a tuple.
+    These will always be ordered (R, G, B, A).
+    */
     @property auto tristimulusWithAlpha() const
     {
         static if (!hasComponent!'a')
             enum a = ComponentType(0);
         return tuple(tristimulus.expand, a);
     }
+
     ///
     unittest
     {
@@ -119,6 +137,7 @@ struct RGB(string format)
         static assert(RGB!"bgra"(255, 128, 10, 80).tristimulusWithAlpha == tuple(NormalizedInt!ubyte(255), NormalizedInt!ubyte(128), NormalizedInt!ubyte(10), NormalizedInt!ubyte(80)));
     }
 }
+
 ///
 unittest
 {
@@ -134,7 +153,6 @@ unittest
     static assert(is(typeof(pixel2.l) == float));
     static assert(is(typeof(pixel2.a) == float));
 }
-
 
 package(wg.color):
 

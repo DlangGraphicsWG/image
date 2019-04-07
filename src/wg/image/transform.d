@@ -1,12 +1,21 @@
-module wg.image.transform;
+// Written in the D programming language.
+/**
+Some sample image transformations.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.image.transform;
 import wg.image;
 import wg.image.imagebuffer;
 
+///
 enum isImageBuffer(T) = is(T == ImageBuffer) || is(T == Image!U, U);
 
 // it's possible to do certain loss-less and opaque transforms on images
 
+///
 Image crop(Image)(ref Image image, uint left, uint right, uint top, uint bottom) if (isImageBuffer!Image)
 {
     assert(left % image.blockWidth == 0 && right % image.blockHeight == 0 &&
@@ -24,6 +33,7 @@ Image crop(Image)(ref Image image, uint left, uint right, uint top, uint bottom)
     return r;
 }
 
+/// TODO: deallocate?
 Image stripMetadata(Image)(ref Image image) if (isImageBuffer!Image)
 {
     Image r = image;

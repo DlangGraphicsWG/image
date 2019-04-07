@@ -1,38 +1,75 @@
-module wg.util.allocator;
+// Written in the D programming language.
+/**
+An allocator representation for compatibility purposes.
+Supports `std.experimental.allocator`, GC and `malloc`.
 
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.util.allocator;
 import wg.util.traits : isReferenceType;
 
 /**
- * A 'hard' allocator struct that supports `std.experimental.allocator`, and can easily interface with C
- */
+Allocator representation as a struct.
+*/
 struct Allocator
 {
-    alias AllocFunc =  void* function(size_t bytes, size_t* allocated, shared void* userData) @nogc nothrow;
-    alias FreeFunc =  void function(void* alloc, size_t bytes, shared void* userData) @nogc nothrow;
+    /// The allocator
+    alias AllocFunc = void* function(size_t bytes, size_t* allocated, shared void* userData) @nogc nothrow;
+    /// The deallocator
+    alias FreeFunc = void function(void* alloc, size_t bytes, shared void* userData) @nogc nothrow;
 
+    /// Allocator function
     AllocFunc allocFunc;
+    /// Deallocator function
     FreeFunc freeFunc;
+
+    /// Pointer to some user data to pass into the allocator/deallocator functions.
     shared void* userData;
 
+    /**
+    Allocates some memory using the allocator function.
+
+    Params:
+        bytes = Number of bytes to allocate
+
+    Returns:
+        The array of memory allocated of length `bytes`.
+    */
     void[] allocate(size_t bytes) @nogc nothrow
     {
         void* mem = allocFunc(bytes, &bytes, userData);
         return mem[0 .. bytes];
     }
 
+    /**
+    Deallocates a given bit of memory using the deallocator function.
+
+    Only deallocate memory using this function if it was allocated by `allocate`.
+    If it was not, behavior is unknown and implementation dependent.
+
+    Params:
+        mem = A memory slice allocated by `allocate`.
+
+    Returns:
+        If successful.
+    */
     bool deallocate(void[] mem) @nogc nothrow
     {
         freeFunc(mem.ptr, mem.length, userData);
         return true;
     }
 
-    // helpers to destroy objects
+    /// A helper function to deallocate a class
     bool deallocate(T)(T cls) @nogc nothrow if (is(T == class))
     {
         cls.destroy!false();
         freeFunc(cast(void*)cls, __traits(classInstanceSize, T), userData);
         return true;
     }
+
+    /// A helper function to deallocate a struct
     bool deallocate(T)(T* obj) @nogc nothrow if (is(T == struct))
     {
         obj.destroy!false();
@@ -42,8 +79,14 @@ struct Allocator
 }
 
 /**
- * Make an `Allocator` from an object that conforms to the `std.experimental.allocator` interface
- */
+Make an `Allocator` from an object that conforms to the `std.experimental.allocator` interface.
+
+Params:
+    instance = The pre-existing instance (if any).
+
+Returns:
+    A copy of an `Allocator` instance that is configured for `Alloc` type.
+*/
 Allocator makeAllocator(Alloc)(shared(Alloc) instance = null) if (isReferenceType!Alloc)
 {
     static alloc(size_t bytes, size_t* allocated, shared void* userData) @nogc nothrow
@@ -64,8 +107,11 @@ Allocator makeAllocator(Alloc)(shared(Alloc) instance = null) if (isReferenceTyp
 }
 
 /**
- * Get an allocator that uses the C malloc()/free() functions.
- */
+Makes an `Allocator` using C's `malloc` and `free` as the implementation.
+
+Returns:
+    A copy of an `Allocator` instance that is configured with `malloc` and `free`.
+*/
 Allocator* getMallocAllocator()
 {
     import core.stdc.stdlib : malloc, free;

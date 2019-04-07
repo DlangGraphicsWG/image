@@ -1,9 +1,16 @@
+// Written in the D programming language.
+/**
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.image.format;
-
 import wg.image.imagebuffer;
 
+///
 alias GetImageParams = bool function(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @safe;
 
+///
 void registerImageFormatFamily(string family, GetImageParams getImageParams)
 {
     FormatFamily* formatFamily = new FormatFamily;
@@ -13,6 +20,7 @@ void registerImageFormatFamily(string family, GetImageParams getImageParams)
     imageFormats = formatFamily;
 }
 
+///
 string getFormatFamily(const(char)[] format) nothrow @nogc @trusted
 {
     FormatFamily* f = imageFormats;
@@ -26,6 +34,7 @@ string getFormatFamily(const(char)[] format) nothrow @nogc @trusted
     return null;
 }
 
+///
 bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @trusted
 {
     FormatFamily* f = imageFormats;
@@ -38,7 +47,7 @@ bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuff
     return false;
 }
 
-
+///
 template FormatForPixelType(T)
 {
     // this hack emulates ADL
@@ -49,7 +58,6 @@ template FormatForPixelType(T)
     // expect a template called `FormatString` beside every colour type
     enum FormatForPixelType = M.FormatString!T;
 }
-
 
 private:
 

@@ -1,8 +1,18 @@
+// Written in the D programming language.
+/**
+Basic parsing utility code.
+
+For internal use only.
+
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
 module wg.util.parse;
 
 /**
- * Skip characters.
- */
+Skip characters.
+*/
 inout(char)[] skip(string chars)(inout(char)[] s) @safe pure nothrow @nogc
 {
     outer: foreach (i; 0 .. s.length)
@@ -17,13 +27,13 @@ inout(char)[] skip(string chars)(inout(char)[] s) @safe pure nothrow @nogc
 }
 
 /**
- * Skip whitespace characters. (but not newlines)
- */
+Skip whitespace characters. (but not newlines)
+*/
 alias skipWhite = skip!" \t";
 
 
 /**
-* Parse real from string.
+Parse real from string.
 */
 I parseInt(I)(const(char)[] str) @safe pure
 {
@@ -33,7 +43,7 @@ I parseInt(I)(const(char)[] str) @safe pure
 }
 
 /**
-* Parse real from string.
+Parse real from string.
 */
 size_t parseInt(I)(const(char)[] str, out I num) @trusted pure nothrow @nogc
 {
@@ -58,8 +68,8 @@ size_t parseInt(I)(const(char)[] str, out I num) @trusted pure nothrow @nogc
 
 
 /**
- * Parse real from string.
- */
+Parse real from string.
+*/
 F parseReal(F)(const(char)[] str) @safe pure
 {
     F r;
@@ -68,8 +78,8 @@ F parseReal(F)(const(char)[] str) @safe pure
 }
 
 /**
- * Parse real from string.
- */
+Parse real from string.
+*/
 size_t parseReal(F)(const(char)[] str, out F num) @trusted pure nothrow @nogc
 {
     const(char)[] s = str;

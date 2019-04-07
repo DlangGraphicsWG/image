@@ -1,15 +1,12 @@
 // Written in the D programming language.
-
 /**
 This module implements support for normalized integers.
 
 Authors:    Manu Evans
-Copyright:  Copyright (c) 2015, Manu Evans.
+Copyright:  Copyright (c) 2015-2019, Manu Evans.
 License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
-Source:     $(PHOBOSSRC std/experimental/_normint.d)
 */
 module wg.util.normint;
-
 import wg.util.traits : isSigned, isFloatingPoint;
 import std.traits : isIntegral, isUnsigned, Unsigned;
 
@@ -234,6 +231,7 @@ pure nothrow @nogc:
         return normIntToFloat!F(value);
     }
 }
+
 ///
 unittest
 {
@@ -284,6 +282,7 @@ To convertNormInt(To, From)(From i) if (isIntegral!From && isIntegral!To)
 {
     return cast(To)convertNormBits!(From.sizeof*8, isSigned!From, To.sizeof*8, isSigned!To, Unsigned!To, Unsigned!From)(i);
 }
+
 ///
 unittest
 {
@@ -381,6 +380,7 @@ T floatToNormBits(size_t bits, bool signed, T = uint, F)(F f) pure nothrow @nogc
         return cast(T)(f*BitsSMax!bits - 0.5) & BitsUMax!bits;
     }
 }
+
 unittest
 {
     // float unpacking
@@ -431,6 +431,7 @@ F normBitsToFloat(size_t bits, bool signed, F = float)(uint v) pure nothrow @nog
         return max((cast(int)(v << (32 - bits)) >> (32 - bits)) / F(BitsSMax!bits), F(-1));
     }
 }
+
 unittest
 {
     // float unpacking
@@ -530,6 +531,7 @@ T convertNormBits(size_t srcBits, bool srcSigned, size_t destBits, bool destSign
         }
     }
 }
+
 unittest
 {
     // unsigned -> unsigned int
@@ -627,7 +629,6 @@ unittest
     static assert(convertNormBits!(3, true, 32, true, uint)(7u) == 0xD5555556);
 }
 
-
 private:
 
 template WorkInt(I)
@@ -639,6 +640,7 @@ template WorkInt(I)
     else
         alias WorkInt = long;  // (u)int promotes to long, so we can overflow and saturate instead of wrapping
 }
+
 unittest
 {
     static assert(is(WorkInt!short == int));
@@ -884,7 +886,6 @@ unittest
     static assert(cast(NormalizedInt!short)NormalizedInt!byte(-127) == -32767);
     static assert(cast(NormalizedInt!byte)NormalizedInt!short(-32767) == -127);
 }
-
 
 // the phobos implementations are literally insane!!
 T _min(T)(T a, T b) { return a < b ? a : b; }

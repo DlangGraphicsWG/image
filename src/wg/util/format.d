@@ -1,10 +1,19 @@
-module wg.util.format;
+// Written in the D programming language.
+/**
+Basic formatting code that uses buffers.
 
+For internal use only.
+
+Authors:    Manu Evans
+Copyright:  Copyright (c) 2019, Manu Evans.
+License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
+*/
+module wg.util.format;
 import wg.util.traits : isSigned;
 
 /**
- * Format an integer as a string.
- */
+Format an integer as a string.
+*/
 string formatInt(I)(I i, uint minSize = 0) @safe pure nothrow
 {
     char[21] buffer;
@@ -13,8 +22,8 @@ string formatInt(I)(I i, uint minSize = 0) @safe pure nothrow
 }
 
 /**
- * Format an integer as a string.
- */
+Format an integer as a string.
+*/
 char[] formatInt(I)(I i, ref char[21] output, uint minSize = 0) @safe pure nothrow @nogc
 {
     assert(minSize <= 20, "Too many digits!");
@@ -57,8 +66,8 @@ char[] formatInt(I)(I i, ref char[21] output, uint minSize = 0) @safe pure nothr
 }
 
 /**
- * Format a real as a string.
- */
+Format a real as a string.
+*/
 string formatReal(F)(F f, uint decimals = 3) @safe pure nothrow
 {
     char[22] buffer;
@@ -67,8 +76,8 @@ string formatReal(F)(F f, uint decimals = 3) @safe pure nothrow
 }
 
 /**
- * Format a real as a string.
- */
+Format a real as a string.
+*/
 char[] formatReal(F)(F f, ref char[22] output, uint decimals = 3) @trusted pure nothrow @nogc
 {
     assert(decimals <= 20, "Too many decimal places!");
