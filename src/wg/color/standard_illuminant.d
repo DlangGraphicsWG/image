@@ -6,7 +6,9 @@ Authors:    Manu Evans
 Copyright:  Copyright (c) 2019, Manu Evans.
 License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
+
 module wg.color.standard_illuminant;
+
 import wg.color.xyz : xyY;
 
 /// The $(LINK2 https://en.wikipedia.org/wiki/Standard_illuminant, standard illuminants).

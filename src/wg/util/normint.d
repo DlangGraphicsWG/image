@@ -6,7 +6,9 @@ Authors:    Manu Evans
 Copyright:  Copyright (c) 2015-2019, Manu Evans.
 License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
+
 module wg.util.normint;
+
 import wg.util.traits : isSigned, isFloatingPoint;
 import std.traits : isIntegral, isUnsigned, Unsigned;
 
