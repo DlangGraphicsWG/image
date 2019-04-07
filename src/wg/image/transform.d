@@ -33,7 +33,7 @@ Image crop(Image)(ref Image image, uint left, uint right, uint top, uint bottom)
     return r;
 }
 
-/// TODO: deallocate?
+/// TODO: deallocate? must retain allocation metadata, otherwise can't free!
 Image stripMetadata(Image)(ref Image image) if (isImageBuffer!Image)
 {
     Image r = image;

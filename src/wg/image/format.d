@@ -37,12 +37,10 @@ string getFormatFamily(const(char)[] format) nothrow @nogc @trusted
 ///
 bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuffer image) nothrow @nogc @trusted
 {
-    FormatFamily* f = imageFormats;
-    while (f)
+    for (FormatFamily* f = imageFormats; f; f = f.next)
     {
         if (f.getImageParams(format, width, height, image))
             return true;
-        f = f.next;
     }
     return false;
 }
@@ -50,13 +48,22 @@ bool getImageParams(const(char)[] format, uint width, uint height, out ImageBuff
 ///
 template FormatForPixelType(T)
 {
-    // this hack emulates ADL
     import std.traits : moduleName;
-    mixin("import " ~ moduleName!T ~ ";");
-    mixin("alias M = " ~ moduleName!T ~ ";");
 
-    // expect a template called `FormatString` beside every colour type
-    enum FormatForPixelType = M.FormatString!T;
+    static if (is(typeof(moduleName!T)))
+    {
+        // this hack emulates ADL
+        mixin("import " ~ moduleName!T ~ ";");
+        mixin("alias M = " ~ moduleName!T ~ ";");
+
+        // expect a template called `FormatString` beside every colour type
+        static if (is(typeof(M.FormatString!T)))
+            enum FormatForPixelType = M.FormatString!T;
+        else
+            static assert(false, "Unable to determine format for pixel type: " ~ T.stringof ~ ", no `FormatString(T)` specified for type");
+    }
+    else
+        static assert(false, "Unable to determine format for pixel type: " ~ T.stringof ~ ", primitive types not supported");
 }
 
 private:

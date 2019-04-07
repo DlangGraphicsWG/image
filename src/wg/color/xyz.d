@@ -23,12 +23,9 @@ enum IsXYZ(T) = is(T == XYZ) || is(T == xyY);
 /**
 Get the format string for an XYZ or xyY color type.
 */
-template FormatString(T) if (is(T == XYZ) || is(T == xyY))
+template FormatString(T) if (IsXYZ!T)
 {
-    static if (is(T == XYZ))
-        enum FormatString = "XYZ";
-    else
-        enum FormatString = "xyY";
+    enum FormatString = T.stringof;
 }
 
 /**
