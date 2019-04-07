@@ -238,7 +238,7 @@ unittest
 
     // test RGB format conversions
     alias UnsignedRGB = RGB!("rgb");
-    alias SignedRGBX = RGB!("rgbx_s8_s8_s8_s8");
+    alias SignedRGBX = RGB!("rgbx_s8_s8_s8_8");
     alias FloatRGBA = RGB!("rgba_f32_f32_f32_f32");
 
     static assert(convertColorImpl!(UnsignedRGB)(SignedRGBX(0x20,0x30,-10)) == UnsignedRGB(0x40,0x60,0));
@@ -334,9 +334,7 @@ void registerRGB()
         import wg.color.rgb.format;
 
         RGBFormatDescriptor desc;
-        RGBFormatDescriptor.ComponentDesc[6] components;
-
-        string error = parseRGBFormat(format, desc, components);
+        string error = parseRGBFormat(format, desc);
 
         if (error)
             return false;
