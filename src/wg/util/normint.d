@@ -10,6 +10,7 @@ License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
 module wg.util.normint;
 
 import wg.util.traits : isSigned, isFloatingPoint;
+import wg.util.util;
 import std.traits : isIntegral, isUnsigned, Unsigned;
 
 @safe pure nothrow @nogc:
@@ -458,7 +459,7 @@ F normBitsToFloat(size_t bits, bool signed, F = float)(uint v) pure nothrow @nog
     else
     {
         import std.algorithm : max;
-        return max((cast(int)(v << (32 - bits)) >> (32 - bits)) / F(BitsSMax!bits), F(-1));
+        return _max((cast(int)(v << (32 - bits)) >> (32 - bits)) / F(BitsSMax!bits), F(-1));
     }
 }
 
@@ -916,8 +917,3 @@ unittest
     static assert(cast(NormalizedInt!short)NormalizedInt!byte(-127) == -32767);
     static assert(cast(NormalizedInt!byte)NormalizedInt!short(-32767) == -127);
 }
-
-// the phobos implementations are literally insane!!
-pragma(inline, true) T _min(T)(T a, T b) { return a < b ? a : b; }
-pragma(inline, true) T _max(T)(T a, T b) { return a > b ? a : b; }
-pragma(inline, true) T _clamp(T)(T v, T min, T max) { return v < min ? min : v > max ? max : v; }

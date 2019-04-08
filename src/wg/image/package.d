@@ -37,6 +37,8 @@ struct Image(ElementType)
     ///
     this(ref ImageBuffer image)
     {
+        import wg.util.util : asDString;
+
         assert(image.pixelFormat.asDString[] == FormatForPixelType!ElementType[]);
         assert(image.blockWidth == 1 && image.blockHeight == 1 && image.bitsPerBlock / 8 == ElementType.sizeof);
         img = image;

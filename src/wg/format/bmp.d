@@ -27,6 +27,7 @@ Format an image into a BMP image buffer.
 void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nogc
 {
     import wg.color.rgb.format : RGBFormatDescriptor, parseRGBFormat;
+    import wg.util.util : asDString;
 
     if (image.blockWidth != 1 || image.blockHeight != 1 ||
         (image.bitsPerBlock != 16 && image.bitsPerBlock != 24 && image.bitsPerBlock != 32))
