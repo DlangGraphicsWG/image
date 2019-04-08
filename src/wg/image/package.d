@@ -16,10 +16,33 @@ import wg.image.format;
 import wg.image.metadata;
 import wg.util.allocator;
 
-/// does T look like an image?
-enum isImage(T) = true;
-/// is T a valid image element type?
-enum isValidPixelType(T) = true;
+/// Is T a valid image element type?
+enum isValidPixelType(ElementType) = !is(ElementType == void);
+
+/// Get the element type for an image-like object.
+template ElementType(Img)
+{
+    import wg.util.traits : Unqual;
+
+    static if (is(Img == Image!Element, Element))
+        alias ElementType = Element;
+    else static if (__traits(compiles, (cast(Img*)null).at(0, 0)))
+        alias ElementType = Unqual!(typeof((cast(Img*)null).at(0, 0)));
+    else static if (__traits(compiles, (cast(Img*)null).row(0)) && is(typeof((cast(Img*)null).row(0)) == Element[], Element))
+        alias ElementType = Unqual!Element;
+    else
+        alias ElementType = void;
+}
+
+/// Does T behave like an image?
+template isImage(Img)
+{
+    static if (isValidPixelType!(ElementType!Img) &&
+               is(typeof(Img.width) : uint) && is(typeof(Img.height) : uint))
+        enum isImage = true;
+    else
+        enum isImage = false;
+}
 
 /**
 Strong typed wrapper for ImageBuffer.
