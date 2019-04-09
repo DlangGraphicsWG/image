@@ -50,13 +50,15 @@ struct RGB(string format)
                       (Format.flags & RGBFormatDescriptor.Flags.AllAligned) &&
                       (Format.flags & RGBFormatDescriptor.Flags.AllSameSize);
 
+    alias Component = RGBFormatDescriptor.Component;
+
+    enum hasComponent(char c) = mixin("is(typeof(" ~ c ~ "))");
+
     static if (isOperable)
     {
         /// format can have hard members
         alias ComponentType = TypeFor!(Format.components[0].format, Format.components[0].bits, Format.components[0].fracBits);
-
-        ///
-        enum hasComponent(char c) = mixin("is(typeof(" ~ c ~ "))");
+        alias MissingComponentType = ComponentType;
 
         /// the argument type used for construction and methods
         static if (isFloatingPoint!ComponentType)
@@ -88,8 +90,92 @@ struct RGB(string format)
     }
     else
     {
-        /// format needs bit-unpacking; components are properties
-        pragma(msg, "TODO: fabricate properties for the bitpacked members...");
+        static assert(Format.bits <= 64, "Packed pixel formats larger than 64bits not supported");
+
+        alias MissingComponentType = float; // float or NormalizedInt!ubyte?
+        alias PackedType = IntForSize!(Format.bits, false);
+
+        // packed data member
+        PackedType packed;
+
+        // getter functions
+        static if (HasComponent!(Component.Red))
+            @property ComponentType!(Component.Red) r() const pure nothrow @nogc @safe { return unpack!(Component.Red)(packed); }
+        static if (HasComponent!(Component.Green))
+            @property ComponentType!(Component.Green) g() const pure nothrow @nogc @safe { return unpack!(Component.Green)(packed); }
+        static if (HasComponent!(Component.Blue))
+            @property ComponentType!(Component.Blue) b() const pure nothrow @nogc @safe { return unpack!(Component.Blue)(packed); }
+        static if (HasComponent!(Component.Alpha))
+            @property ComponentType!(Component.Alpha) a() const pure nothrow @nogc @safe { return unpack!(Component.Alpha)(packed); }
+        static if (HasComponent!(Component.Luma))
+            @property ComponentType!(Component.Luma) l() const pure nothrow @nogc @safe { return unpack!(Component.Luma)(packed); }
+
+        /** Construct a color from RGB and optional alpha values. */
+        this(float r, float g, float b, float a = 0)
+        {
+            packed = 0;
+            static if (HasComponent!(Component.Red))
+                packed |= pack!(Component.Red)(r);
+            static if (HasComponent!(Component.Green))
+                packed |= pack!(Component.Green)(g);
+            static if (HasComponent!(Component.Blue))
+                packed |= pack!(Component.Blue)(b);
+            static if (HasComponent!(Component.Alpha))
+                packed |= pack!(Component.Alpha)(a);
+            static if (HasComponent!(Component.Luma))
+                packed |= pack!(Component.Luma)(toMonochrome!ColorSpace(r, g, b));
+        }
+
+        /** Construct a color from a luminance and optional alpha value. */
+        this(float l, float a = 0)
+        {
+            packed = 0;
+            static if (HasComponent!(Component.Red))
+                packed |= pack!(Component.Red)(l);
+            static if (HasComponent!(Component.Green))
+                packed |= pack!(Component.Green)(l);
+            static if (HasComponent!(Component.Blue))
+                packed |= pack!(Component.Blue)(l);
+            static if (HasComponent!(Component.Luma))
+                packed |= pack!(Component.Luma)(l);
+            static if (HasComponent!(Component.Alpha))
+                packed |= pack!(Component.Alpha)(a);
+        }
+
+    private:
+        // wrangle the components
+        enum HasComponent(Component type) = Format.has(type);
+        enum ComponentIndex(Component type) = Format.componentIndex[type];
+        enum ComponentDesc(Component type) = Format.components[Format.componentIndex[type]];
+
+        template ComponentType(Component type)
+        {
+            enum int index = ComponentIndex!type;
+            static if (index == -1)
+                alias ComponentType = MissingComponentType;
+            else
+                alias ComponentType = TypeFor!(ComponentDesc!type.format, ComponentDesc!type.bits, ComponentDesc!type.fracBits);
+        }
+
+        union PackedComponent(Component type)
+        {
+            PackedType pak = 0;
+            ComponentType!type val = void;
+        }
+        pragma(inline, true)
+        PackedType pack(Component type)(float val) pure nothrow @nogc @safe
+        {
+            PackedComponent!type u;
+            u.val = ComponentType!type(val);
+            return u.pak << ComponentDesc!type.offset;
+        }
+        pragma(inline, true)
+        ComponentType!type unpack(Component type)(PackedType val) const pure nothrow @nogc @safe
+        {
+            PackedComponent!type u = void;
+            u.pak = (val >> ComponentDesc!type.offset) & ((1 << ComponentDesc!type.bits) - 1);
+            return u.val;
+        }
     }
 
     /**
@@ -104,11 +190,11 @@ struct RGB(string format)
         else
         {
             static if (!hasComponent!'r')
-                enum r = ComponentType(0);
+                enum r = MissingComponentType(0);
             static if (!hasComponent!'g')
-                enum g = ComponentType(0);
+                enum g = MissingComponentType(0);
             static if (!hasComponent!'b')
-                enum b = ComponentType(0);
+                enum b = MissingComponentType(0);
             return tuple(r, g, b);
         }
     }
@@ -127,7 +213,7 @@ struct RGB(string format)
     @property auto tristimulusWithAlpha() const
     {
         static if (!hasComponent!'a')
-            enum a = ComponentType(0);
+            enum a = MissingComponentType(0);
         return tuple(tristimulus.expand, a);
     }
 
@@ -153,6 +239,16 @@ unittest
 
     static assert(is(typeof(pixel2.l) == float));
     static assert(is(typeof(pixel2.a) == float));
+
+    RGB!"rgba_10_10_10_2" pixel3;
+    pixel3 = typeof(pixel3)(1, 0.5, 0.1, 0.5);
+    assert(pixel3.tristimulusWithAlpha == tuple(0x3FF, 0x200, 0x66, 0x2));
+
+    RGB!"rgb_11_f11_f3.7" pixel4;
+    pixel4 = typeof(pixel4)(0.5, 0.5, 0.5);
+    assert(pixel4.tristimulus == tuple(0x400, 0.5f, 0.5f));
+    pixel4 = typeof(pixel4)(10, 10, 10);
+    assert(pixel4.tristimulus == tuple(0x7FF, 10.0f, 10.0f));
 }
 
 package(wg.color):
@@ -358,9 +454,21 @@ enum char[] ComponentName = [ 'r', 'g', 'b', 'a', 'l', 'e', 'x' ];
 template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
 {
     static if (format == RGBFormatDescriptor.Format.NormInt || format == RGBFormatDescriptor.Format.SignedNormInt)
-        alias TypeFor = NormalizedInt!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedNormInt));
+        alias TypeFor = NormalizedInt!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedNormInt), bits);
     else static if (format == RGBFormatDescriptor.Format.FloatingPoint)
-        alias TypeFor = FloatForSize!bits;
+    {
+        static if (bits == 32 && (frac == 0 || frac == 23))
+            alias TypeFor = float;
+        else static if (bits == 64 && (frac == 0 || frac == 52))
+            alias TypeFor = double;
+        else
+        {
+            // if no frac bits are given, guess 5 for > 8bit floats, or 3 for very small floats
+            // guess signed for >= 16bit floats, otherwise unsigned
+            enum exp = (frac ? bits - frac : (bits > 8 ? 5 : 3)) - (bits >= 16);
+            alias TypeFor = PackedFloat!(IntForSize!(bits, false), bits, bits >= 16, exp);
+        }
+    }
     else static if (format == RGBFormatDescriptor.Format.UnsignedInt || format == RGBFormatDescriptor.Format.SignedInt)
         alias TypeFor = IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedInt);
     else static if (format == RGBFormatDescriptor.Format.FixedPoint || format == RGBFormatDescriptor.Format.SignedFixedPoint)
@@ -373,28 +481,28 @@ template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
 
 template IntForSize(size_t size, bool signed)
 {
-    static if (size == 8)
+    static if (size <= 8)
     {
         static if (signed)
             alias IntForSize = byte;
         else
             alias IntForSize = ubyte;
     }
-    else static if (size == 16)
+    else static if (size <= 16)
     {
         static if (signed)
             alias IntForSize = short;
         else
             alias IntForSize = ushort;
     }
-    else static if (size == 32)
+    else static if (size <= 32)
     {
         static if (signed)
             alias IntForSize = int;
         else
             alias IntForSize = uint;
     }
-    else static if (size == 64)
+    else static if (size <= 64)
     {
         static if (signed)
             alias IntForSize = long;
@@ -405,40 +513,166 @@ template IntForSize(size_t size, bool signed)
         static assert("Invalid size!");
 }
 
-template FloatForSize(size_t size)
-{
-    static if (size == 16)
-        alias FloatForSize = float16;
-    else static if (size == 32)
-        alias FloatForSize = float;
-    else static if (size == 64)
-        alias FloatForSize = double;
-    else
-        static assert("Invalid size!");
-}
-
-// TODO: need a fixed point type
 struct FixedPoint(I, int frac)
 {
     alias IntType = I;
 
+    enum max = I.max / float(1 << frac);
+    enum min_normal = 1 / float(1 << frac);
+
     alias asFloat this;
 
-    float asFloat() const { assert(false); }
-    void asFloat(float f) { assert(false); }
+    float asFloat() const pure nothrow @nogc @safe
+    {
+        return val / float(1 << frac);
+    }
+    void asFloat(float f) pure nothrow @nogc @safe
+    {
+        val = cast(I)(f * (1 << frac));
+    }
 
     private I val;
 }
 
-// TODO: need a float16 type
-struct float16
+struct PackedFloat(I, size_t bits, bool signed, size_t expBits, int bias = (1 << expBits-1)-1)
 {
+    static assert (bits < 32, "Packed float is only for small floats");
+    static assert (expBits < bits - signed, "Too many exponent bits");
+    static assert (mant_dig <= 23, "Mantissas > 23 bits not supported");
+
+    alias IntType = I;
+
+    enum infinity = typeof(this)(exponentMask);
+    enum nan = typeof(this)(exponentMask | mantissaMask);
+
+    enum mant_dig = bits - expBits - signed;
+
+    enum max = typeof(this)((exponentMask - 1) | mantissaMask);
+    enum min_normal = typeof(this)(1 << mant_dig);
+
     alias asFloat this;
 
-    float asFloat() const { assert(false); }
-    void asFloat(float f) { assert(false); }
+    this(IntType value)
+    {
+        packed = value;
+    }
+    this(float value)
+    {
+        asFloat(value);
+    }
 
-    private ushort f;
+    @property float asFloat() const
+    {
+        union U {
+            uint unpacked = 0;
+            float f;
+        }
+        U u;
+        static if (signed)
+            u.unpacked = (packed & signMask) << (32 - bits);
+        if (packed & (exponentMask | mantissaMask))
+        {
+            if ((packed & exponentMask) == exponentMask)
+            {
+                u.unpacked |= 0xFF << 23;
+                if (packed & mantissaMask)
+                    u.unpacked |= (packed & (1 << mant_dig - 1)) ? (1 << 23) - 1 : (1 << 22) - 1;
+            }
+            else if ((packed & exponentMask) == 0)
+            {
+                // TODO: we don't support denormals...
+                //       clamp to zero
+            }
+            else
+            {
+                u.unpacked |= int(((packed & exponentMask) >> mant_dig) - bias + 127) << 23;
+                u.unpacked |= (packed & mantissaMask) << (23 - mant_dig);
+            }
+        }
+        return u.f;
+    }
+    @property void asFloat(float f)
+    {
+        union U {
+            this(float f) { this.f = f; }
+            float f;
+            uint unpacked;
+        }
+        U u = U(f);
+        packed = 0;
+        static if (signed)
+            packed = (u.unpacked >> (32 - bits)) & signMask;
+        // check it's not zero
+        if ((u.unpacked & 0x7FFFFFFF) != 0)
+        {
+            enum I maxExponent = (1 << expBits) - 1;
+            int exp = int((u.unpacked >> 23) & 0xFF) - 127 + bias;
+            if (exp >= maxExponent)
+            {
+                // large numbers clamp to infinity
+                packed |= exponentMask;
+                // or is it a NaN?
+                if (exp == 128 + bias && (u.unpacked & ((1 << 23) - 1)) != 0)
+                    packed |= (u.unpacked & (1 << 22)) ? mantissaMask : mantissaMask >> 1;
+            }
+            else if (exp <= 0)
+            {
+                // TODO: should support denormals?
+                //       is it in the spec for small floats?
+                //       we'll clamp to zero
+            }
+            else
+            {
+                if (signed || u.unpacked >> 31 == 0)
+                {
+                    packed |= exp << mant_dig;
+                    packed |= (u.unpacked >> (23 - mant_dig)) & mantissaMask;
+                }
+            }
+        }
+    }
+
+private:
+    enum I exponentMask = ((1 << expBits) - 1) << mant_dig;
+    enum I mantissaMask = (1 << mant_dig) - 1;
+    enum I signMask = 1 << (bits - 1);
+
+    I packed;
+}
+unittest
+{
+    PackedFloat!(ushort, 16, true, 5) f;
+    f.asFloat = 1.0f;               assert(f.asFloat == 1.0f);
+    f.asFloat = -1.0f;              assert(f.asFloat == -1.0f);
+    f.asFloat = 10.5f;              assert(f.asFloat == 10.5f);
+    f.asFloat = 0.0f;               assert(f.asFloat == 0.0f);
+    f.asFloat = -0.0f;              assert(f.asFloat == -0.0f);
+    f.asFloat = 0.0000001f;         assert(f.asFloat == 0.0f);
+    f.asFloat = 1000000.0f;         assert(f.asFloat == float.infinity);
+    f.asFloat = -1000000.0f;        assert(f.asFloat == -float.infinity);
+    f.asFloat = float.infinity;     assert(f.asFloat == float.infinity);
+    f.asFloat = -float.infinity;    assert(f.asFloat == -float.infinity);
+//    f.asFloat = float.nan;          assert(f.asFloat is float.nan); // how to we test nan?
+
+    PackedFloat!(ushort, 11, false, 5) f2;
+    f2.asFloat = 1.0f;              assert(f2.asFloat == 1.0f);
+    f2.asFloat = -1.0f;             assert(f2.asFloat == 0.0f);
+    f2.asFloat = 10.5f;             assert(f2.asFloat == 10.5f);
+    f2.asFloat = 0.0f;              assert(f2.asFloat == 0.0f);
+    f2.asFloat = 0.0000001f;        assert(f2.asFloat == 0.0f);
+    f2.asFloat = 1000000.0f;        assert(f2.asFloat is float.infinity);
+    f2.asFloat = float.infinity;    assert(f2.asFloat is float.infinity);
+//    f2.asFloat = float.nan;         assert(f2.asFloat is float.nan); // how to we test nan?
+
+    PackedFloat!(ubyte, 8, false, 3) f3;
+    f3.asFloat = 1.0f;              assert(f3.asFloat == 1.0f);
+    f3.asFloat = -1.0f;             assert(f3.asFloat == 0.0f);
+    f3.asFloat = 10.5f;             assert(f3.asFloat == 10.5f);
+    f3.asFloat = 0.0f;              assert(f3.asFloat == 0.0f);
+    f3.asFloat = 0.0000001f;        assert(f3.asFloat == 0.0f);
+    f3.asFloat = 1000000.0f;        assert(f3.asFloat is float.infinity);
+    f3.asFloat = float.infinity;    assert(f3.asFloat is float.infinity);
+//    f3.asFloat = float.nan;         assert(f3.asFloat is float.nan); // how to we test nan?
 }
 
 // build mixin code to perform expresions per-element
