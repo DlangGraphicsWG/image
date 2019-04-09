@@ -1,6 +1,6 @@
 // Written in the D programming language.
 /**
-RGB the type.
+RGB colour type.
 
 Authors:    Manu Evans
 Copyright:  Copyright (c) 2019, Manu Evans.
@@ -13,7 +13,7 @@ public import wg.color.rgb.colorspace;
 public import wg.color.rgb.format;
 
 import wg.color.xyz : XYZ;
-import wg.util.traits : isFloatingPoint;
+import wg.util.traits : isFloatingPoint, IntForSize;
 import wg.util.normint;
 
 import std.typecons : tuple;
@@ -251,6 +251,7 @@ unittest
     assert(pixel4.tristimulus == tuple(0x7FF, 10.0f, 10.0f));
 }
 
+
 package(wg.color):
 
 // trim the `^gamma` from colorspace id strings
@@ -454,7 +455,9 @@ enum char[] ComponentName = [ 'r', 'g', 'b', 'a', 'l', 'e', 'x' ];
 template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
 {
     static if (format == RGBFormatDescriptor.Format.NormInt || format == RGBFormatDescriptor.Format.SignedNormInt)
+    {
         alias TypeFor = NormalizedInt!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedNormInt), bits);
+    }
     else static if (format == RGBFormatDescriptor.Format.FloatingPoint)
     {
         static if (bits == 32 && (frac == 0 || frac == 23))
@@ -470,68 +473,21 @@ template TypeFor(RGBFormatDescriptor.Format format, size_t bits, size_t frac)
         }
     }
     else static if (format == RGBFormatDescriptor.Format.UnsignedInt || format == RGBFormatDescriptor.Format.SignedInt)
+    {
         alias TypeFor = IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedInt);
+    }
     else static if (format == RGBFormatDescriptor.Format.FixedPoint || format == RGBFormatDescriptor.Format.SignedFixedPoint)
+    {
+        import wg.util.fixedpoint;
+
         alias TypeFor = FixedPoint!(IntForSize!(bits, format == RGBFormatDescriptor.Format.SignedFixedPoint), frac);
+    }
     else static if (format == RGBFormatDescriptor.Format.Exponent || format == RGBFormatDescriptor.Format.Mantissa)
+    {
         alias TypeFor = IntForSize!(bits, false);
+    }
     else
         static assert("Invalid format and bits!");
-}
-
-template IntForSize(size_t size, bool signed)
-{
-    static if (size <= 8)
-    {
-        static if (signed)
-            alias IntForSize = byte;
-        else
-            alias IntForSize = ubyte;
-    }
-    else static if (size <= 16)
-    {
-        static if (signed)
-            alias IntForSize = short;
-        else
-            alias IntForSize = ushort;
-    }
-    else static if (size <= 32)
-    {
-        static if (signed)
-            alias IntForSize = int;
-        else
-            alias IntForSize = uint;
-    }
-    else static if (size <= 64)
-    {
-        static if (signed)
-            alias IntForSize = long;
-        else
-            alias IntForSize = ulong;
-    }
-    else
-        static assert("Invalid size!");
-}
-
-struct FixedPoint(I, int frac)
-{
-    alias IntType = I;
-
-    enum max = I.max / float(1 << frac);
-    enum min_normal = 1 / float(1 << frac);
-
-    alias asFloat this;
-
-    float asFloat() const pure nothrow @nogc @safe
-    {
-        return val / float(1 << frac);
-    }
-    void asFloat(float f) pure nothrow @nogc @safe
-    {
-        val = cast(I)(f * (1 << frac));
-    }
-
-    private I val;
 }
 
 struct PackedFloat(I, size_t bits, bool signed, size_t expBits, int bias = (1 << expBits-1)-1)
