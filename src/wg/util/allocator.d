@@ -140,9 +140,9 @@ package(wg):
 
 // this is a hack, strictly for internal use, which returns a GC allocator in a `@nogc` container
 // it can be used by GC allocating overloads to call through to `@nogc` implementation functions
-Allocator* getGcAllocator()
+Allocator* getGcAllocator() nothrow @nogc
 {
-    static void* gcAlloc(size_t bytes, size_t* allocated, shared void* userData) nothrow @trusted
+    static void* gcAlloc(size_t bytes, size_t* allocated, shared void*) nothrow @trusted
     {
         void[] mem = new void[bytes];
         if (allocated)

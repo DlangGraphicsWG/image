@@ -170,7 +170,7 @@ void registerXYZ()
             return false;
 
         // the following code assumes they are the same size
-        assert(XYZ.sizeof == xyY.sizeof);
+        static assert(XYZ.sizeof == xyY.sizeof);
 
         image.width = width;
         image.height = height;
