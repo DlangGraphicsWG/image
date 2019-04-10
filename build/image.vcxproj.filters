@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="color">
+      <UniqueIdentifier>{44323D0F-B046-65C0-79C8-0820E59B61F1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="image">
+      <UniqueIdentifier>{A87CA80F-1491-D0C0-DD12-742049E6CCF1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="format">
+      <UniqueIdentifier>{bf38f676-9b47-4d8d-9e30-582f11ddcb42}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="color\rgb">
+      <UniqueIdentifier>{a9689d8c-49a4-4c8f-a977-348cabe3b8f8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="util">
+      <UniqueIdentifier>{d81ad4d3-6a8b-43fd-b426-79e1c18cb89b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <DCompile Include="..\src\wg\color\package.d">
+      <Filter>color</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\image\format.d">
+      <Filter>image</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\image\imagebuffer.d">
+      <Filter>image</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\image\metadata.d">
+      <Filter>image</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\image\package.d">
+      <Filter>image</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\image\transform.d">
+      <Filter>image</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\rgb\colorspace.d">
+      <Filter>color\rgb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\rgb\package.d">
+      <Filter>color\rgb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\xyz.d">
+      <Filter>color</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\normint.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\parse.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\traits.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\format.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\rgb\format.d">
+      <Filter>color\rgb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\standard_illuminant.d">
+      <Filter>color</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\allocator.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\format\bmp.d">
+      <Filter>format</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\math.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\util.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\packedfloat.d">
+      <Filter>util</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\color\rgb\convert.d">
+      <Filter>color\rgb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\wg\util\fixedpoint.d">
+      <Filter>util</Filter>
+    </DCompile>
+  </ItemGroup>
+</Project>
