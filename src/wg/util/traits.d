@@ -24,3 +24,38 @@ template Unqual(T)
     import core.internal.traits : CoreUnqual = Unqual;
     alias Unqual = CoreUnqual!(T);
 }
+
+///
+template IntForSize(size_t bits, bool signed)
+{
+    static if (bits <= 8)
+    {
+        static if (signed)
+            alias IntForSize = byte;
+        else
+            alias IntForSize = ubyte;
+    }
+    else static if (bits <= 16)
+    {
+        static if (signed)
+            alias IntForSize = short;
+        else
+            alias IntForSize = ushort;
+    }
+    else static if (bits <= 32)
+    {
+        static if (signed)
+            alias IntForSize = int;
+        else
+            alias IntForSize = uint;
+    }
+    else static if (bits <= 64)
+    {
+        static if (signed)
+            alias IntForSize = long;
+        else
+            alias IntForSize = ulong;
+    }
+    else
+        static assert("Invalid size!");
+}
