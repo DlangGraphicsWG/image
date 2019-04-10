@@ -107,22 +107,22 @@ void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nog
     uint bytesPerPixel = image.bitsPerBlock / 8;
     uint bmpPitch = (image.width*bytesPerPixel + 3) & ~3;
 
-    uint headerSize = BMPFileHeader.sizeof + BMPInfoV4.sizeof;
+    uint headerSize = BMPFileHeader.sizeof + BMPInfo!4.sizeof;
     uint imageSize = bmpPitch * image.height;
     uint fileSize = headerSize + imageSize;
 
     void[] bmp = allocator.allocate(fileSize);
 
     BMPFileHeader* header = cast(BMPFileHeader*)bmp.ptr;
-    BMPInfoV4* info = cast(BMPInfoV4*)(header + 1);
+    BMPInfo!4* info = cast(BMPInfo!4*)(header + 1);
     void* data = cast(void*)(info + 1);
 
     *header = BMPFileHeader.init;
     header.size = cast(uint)fileSize;
     header.offBits = cast(uint)headerSize;
 
-    *info = BMPInfoV4.init;
-    info.size = BMPInfoV4.sizeof;
+    *info = BMPInfo!4.init;
+    info.size = BMPInfo!4.sizeof;
     info.width = image.width;
     info.height = -cast(int)image.height;
     info.bitCount = image.bitsPerBlock;
@@ -230,17 +230,17 @@ struct BMPImage
         uint size = *cast(const(uint)*)info;
         switch (size)
         {
-            case BMPInfoV2.sizeof:
-                if (palette) *palette = info + BMPInfoV2.sizeof;
+            case BMPInfo!2.sizeof:
+                if (palette) *palette = info + BMPInfo!2.sizeof;
                 return 2;
-            case BMPInfoV3.sizeof:
-                if (palette) *palette = info + BMPInfoV3.sizeof;
+            case BMPInfo!3.sizeof:
+                if (palette) *palette = info + BMPInfo!3.sizeof;
                 return 3;
-            case BMPInfoV4.sizeof:
-                if (palette) *palette = info + BMPInfoV4.sizeof;
+            case BMPInfo!4.sizeof:
+                if (palette) *palette = info + BMPInfo!4.sizeof;
                 return 4;
-            case BMPInfoV5.sizeof:
-                if (palette) *palette = info + BMPInfoV5.sizeof;
+            case BMPInfo!5.sizeof:
+                if (palette) *palette = info + BMPInfo!5.sizeof;
                 return 5;
             default:
                 return 0;
@@ -261,7 +261,7 @@ struct BMPImage
     {
         if (bmpVersion() < 5)
             return null;
-        const(BMPInfoV5)* info = infoHeader!BMPInfoV5();
+        const(BMPInfo!5)* info = infoHeader!(BMPInfo!5)();
         return (cast(void*)info + info.profileData)[0 .. info.profileSize];
     }
 
@@ -298,7 +298,7 @@ struct BMPImage
                 // colors are always CLUT from a fixed win1.0 palette
                 assert(false);
             case 2:
-                const(BMPInfoV2)* info = infoHeader!BMPInfoV2();
+                const(BMPInfo!2)* info = infoHeader!(BMPInfo!2)();
 
                 assert(info.planes == 1 && info.bitCount < 256);
                 bits = cast(ubyte)info.bitCount;
@@ -309,13 +309,13 @@ struct BMPImage
                 pitch = (((bits * width) / 8) + 3) & ~3;
                 break;
             case 5:
-                const(BMPInfoV5)* info = infoHeader!BMPInfoV5();
+                const(BMPInfo!5)* info = infoHeader!(BMPInfo!5)();
 
                 // what is 'intent'?
 
                 goto case 4;
             case 4:
-                const(BMPInfoV4)* info = infoHeader!BMPInfoV4();
+                const(BMPInfo!4)* info = infoHeader!(BMPInfo!4)();
 
                 // check csType...
                 switch (info.csType)
@@ -349,7 +349,7 @@ struct BMPImage
 
                 goto case 3;
             case 3:
-                const(BMPInfoV3)* info = infoHeader!BMPInfoV3();
+                const(BMPInfo!3)* info = infoHeader!(BMPInfo!3)();
 
                 assert(info.planes == 1 && info.bitCount < 256);
                 bits = cast(ubyte)info.bitCount;
@@ -388,7 +388,7 @@ struct BMPImage
                 {
                     assert(bits == 16 || bits == 32);
 
-                    const(BMPInfoV4)* i4 = infoHeader!BMPInfoV4();
+                    const(BMPInfo!4)* i4 = infoHeader!(BMPInfo!4)();
                     uint alphaMask = bmpVer >= 3 || info.compression == Compression.BI_ALPHABITFIELDS ? i4.alphaMask : 0;
                     uint unusedMask = ~(i4.redMask | i4.greenMask | i4.blueMask | alphaMask);
 
@@ -702,58 +702,52 @@ struct BMPInfoV1
     ubyte bitsPerPixel;
 }
 
-struct BMPInfoV2
+struct BMPInfo(int ver)
 {
-    align(2):
-    uint        size;
-    ushort      width;
-    ushort      height;
-    ushort      planes;
-    ushort      bitCount;
-}
+    static assert (ver >= 2);
 
-struct BMPInfoV3
-{
-    align(2):
-    uint        size = BMPInfoV3.sizeof;
-    int         width;
-    int         height;
+align(2):
+    uint            size = BMPInfo!ver.sizeof;
+
+    static if (ver == 2)
+    {
+        ushort  width;
+        ushort  height;
+    }
+    else
+    {
+        int     width;
+        int     height;
+    }
     ushort      planes = 1;
     ushort      bitCount;
-    Compression compression;
-    uint        sizeImage;
-    int         xPelsPerMeter;
-    int         yPelsPerMeter;
-    uint        clrUsed;
-    uint        clrImportant;
+
+    static if(ver >= 3)
+    {
+        Compression compression;
+        uint        sizeImage;
+        int         xPelsPerMeter;
+        int         yPelsPerMeter;
+        uint        clrUsed;
+        uint        clrImportant;
+    }
+    static if(ver >= 4)
+    {
+        uint                redMask;
+        uint                greenMask;
+        uint                blueMask;
+        uint                alphaMask;
+        LogicalColorSpace   csType;
+        XYZTriple           endpoints;
+        FP16Dot16           gammaRed;
+        FP16Dot16           gammaGreen;
+        FP16Dot16           gammaBlue;
+    }
+    static if(ver >= 5)
+    {
+        GamutMappingIntent  intent;
+        uint                profileData;
+        uint                profileSize;
+        uint                reserved;
+    }
 }
-
-struct BMPInfoV4
-{
-    align(2):
-    BMPInfoV3   base;
-    alias base this;
-
-    uint                redMask;
-    uint                greenMask;
-    uint                blueMask;
-    uint                alphaMask;
-    LogicalColorSpace   csType;
-    XYZTriple           endpoints;
-    FP16Dot16           gammaRed;
-    FP16Dot16           gammaGreen;
-    FP16Dot16           gammaBlue;
-}
-
-struct BMPInfoV5
-{
-    align(2):
-    BMPInfoV4   base;
-    alias base this;
-
-    GamutMappingIntent  intent;
-    uint                profileData;
-    uint                profileSize;
-    uint                reserved;
-}
-
