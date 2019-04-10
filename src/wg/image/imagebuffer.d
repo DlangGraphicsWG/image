@@ -40,6 +40,11 @@ struct ImageBuffer
 
     // TODO: invariant?
 
+    @property const(char)[] format() const
+    {
+        import wg.util.util : asDString;
+        return pixelFormat.asDString();
+    }
 }
 
 
@@ -120,17 +125,6 @@ inout(void)[] getPixel(ref inout(ImageBuffer) image, uint x, uint y)
     return image.data[offset .. offset + elementBytes];
 }
 
-
-// FIXME: HACK
-inout(char)[] asDString(inout(char)* cstr) pure nothrow @nogc @trusted
-{
-    if (!cstr)
-        return null;
-    size_t len = 0;
-    while (cstr[len])
-        ++len;
-    return cstr[0 .. len];
-}
 
 package:
 
