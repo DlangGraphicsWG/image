@@ -11,6 +11,7 @@ module wg.image.transform;
 
 import wg.image;
 import wg.image.imagebuffer;
+import wg.util.allocator;
 
 ///
 enum isImageBuffer(T) = is(T == ImageBuffer) || is(T == Image!U, U);
@@ -49,6 +50,89 @@ Image stripMetadata(Image)(ref Image image) if (isImageBuffer!Image)
 // TODO: flip (not in-place, buffer)
 // TODO: rotation (requires destination image buffer, with matching format)
 
+
+///
+void copy(SrcImg, DestImg)(auto ref SrcImg src, ref DestImg dest) nothrow @nogc if (isImage!SrcImg)// TODO: if (something about dest...)
+{
+    // TODO: assert dest is a writable image
+
+    // strongly type the dest buffer if it's soft-typed
+    static if (is(DestImg == ImageBuffer))
+        auto dst = Image!(ElementType!Src)(dest);
+    else
+        alias dst = dest;
+
+    assert(src.width == dst.width && src.height == dst.height);
+
+    enum srcByRow = __traits(compiles, src.row(0));
+    enum destByRow = __traits(compiles, dst.row(0));
+
+    foreach (y; 0 .. src.height)
+    {
+        static if (srcByRow && destByRow)
+        {
+            dst.row(y)[] = src.row(y)[];
+        }
+        else static if (srcByRow)
+        {
+            auto srcRow = src.row(y);
+            foreach (x; 0 .. src.width)
+                dst.at(x, y) = srcRow[x];
+        }
+        else  static if (destByRow)
+        {
+            auto destRow = dst.row(y);
+            foreach (x; 0 .. src.width)
+                destRow[x] = src.at(x, y);
+        }
+        else
+        {
+            foreach (x; 0 .. src.width)
+                dst.at(x, y) = src.at(x, y);
+        }
+    }
+}
+
+
+/**
+Clone an image buffer into a new image buffer.
+*/
+ImageBuffer clone(ref const(ImageBuffer) src)
+{
+    return clone(src, getGcAllocator());
+}
+
+/**
+Clone an image buffer into a new image buffer.
+*/
+ImageBuffer clone(ref const(ImageBuffer) src, Allocator* allocator) nothrow @nogc
+{
+    ImageBuffer dest;
+
+    // do a deep-clone of the image, including all metadata
+
+    assert(false, "TODO: dynamic image copy");
+}
+
+///
+Image!(ElementType!Img) clone(Img)(auto ref Img src) if (isImage!Img)
+{
+    return clone(src, getGcAllocator());
+}
+
+///
+Image!(ElementType!Img) clone(Img)(auto ref Img src, Allocator* allocator) nothrow @nogc if (isImage!Img)
+{
+    alias Element = ElementType!Img;
+
+    Image!Element dest = wg.image.allocImage!(Element)(src.width, src.height, allocator);
+
+    src.copy(dest);
+
+    return dest;
+}
+
+
 /// Map image elements 
 auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
 {
@@ -57,7 +141,7 @@ auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
         alias width = image.width;
         alias height = image.height;
 
-        auto at(uint x, uint y) const
+        auto at(uint x, uint y) const pure nothrow @nogc
         {
             return mapFunc(image.at(x, y));
         }
@@ -71,7 +155,7 @@ auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
 }
 
 /// Convert image format
-auto convert(TargetFormat, Img)(auto ref Img image) if (isImage!Img && isValidPixelType!TargetFormat)
+auto convert(TargetFormat, Img)(auto ref Img image) pure nothrow @nogc if (isImage!Img && isValidPixelType!TargetFormat)
 {
     import wg.color : convertColor;
 
@@ -92,7 +176,7 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
 
     static struct DynamicConv
     {
-        alias ConvertFunc = TargetFormat function(const(void)*, ref const(RGBFormatDescriptor) rgbDesc);
+        alias ConvertFunc = TargetFormat function(const(void)*, ref const(RGBFormatDescriptor) rgbDesc) pure nothrow @nogc;
 
         this()(auto ref ImageBuffer image)
         {
@@ -170,7 +254,7 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
         @property uint width() const { return image.width; }
         @property uint height() const { return image.height; }
 
-        auto at(uint x, uint y) const
+        auto at(uint x, uint y) const pure nothrow @nogc
         {
             assert(x < width && y < height);
 

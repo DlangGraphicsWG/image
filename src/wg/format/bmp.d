@@ -9,9 +9,46 @@ License:    $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0)
 
 module wg.format.bmp;
 
-import wg.image.imagebuffer;
+import wg.image;
 import wg.image.metadata;
+import wg.image.transform;
 import wg.util.allocator;
+
+/**
+Create an ImageBuffer from a BMP formatted image.
+*/
+ImageBuffer readBMP(void[] bmpBuffer)
+{
+    return readBMP(bmpBuffer, getGcAllocator());
+}
+
+/**
+Create an ImageBuffer from a BMP formatted image.
+*/
+ImageBuffer readBMP(void[] bmpBuffer, Allocator* allocator) //nothrow @nogc
+{
+    auto bmp = BMPImage(bmpBuffer);
+    ImageBuffer src = bmp.getImage();
+    return src.clone(allocator);
+}
+
+/**
+Create an ImageBuffer from a BMP formatted image.
+*/
+Image!RuntimeFormat readBMP(RuntimeFormat)(void[] bmpBuffer)
+{
+    return readBMP!RuntimeFormat(bmpBuffer, getGcAllocator());
+}
+
+/**
+Create an ImageBuffer from a BMP formatted image.
+*/
+Image!RuntimeFormat readBMP(RuntimeFormat)(void[] bmpBuffer, Allocator* allocator) //nothrow @nogc
+{
+    auto bmp = BMPImage(bmpBuffer);
+    ImageBuffer src = bmp.getImage();
+    return src.convert!(RuntimeFormat).clone(allocator);
+}
 
 /**
 Format an image into a BMP image buffer.
@@ -144,6 +181,9 @@ void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nog
 
     return bmp;
 }
+
+
+private:
 
 ///
 struct BMPImage
@@ -576,8 +616,6 @@ struct BMPImage
     }
 }
 
-
-private:
 
 enum Compression : uint
 {

@@ -40,7 +40,7 @@ struct ImageBuffer
 
     // TODO: invariant?
 
-    @property const(char)[] format() const
+    @property const(char)[] format() const pure nothrow @nogc @safe
     {
         import wg.util.util : asDString;
         return pixelFormat.asDString();
