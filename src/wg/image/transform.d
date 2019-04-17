@@ -93,46 +93,6 @@ void copy(SrcImg, DestImg)(auto ref SrcImg src, ref DestImg dest) nothrow @nogc 
     }
 }
 
-
-/**
-Clone an image buffer into a new image buffer.
-*/
-ImageBuffer clone(ref const(ImageBuffer) src)
-{
-    return clone(src, getGcAllocator());
-}
-
-/**
-Clone an image buffer into a new image buffer.
-*/
-ImageBuffer clone(ref const(ImageBuffer) src, Allocator* allocator) nothrow @nogc
-{
-    ImageBuffer dest;
-
-    // do a deep-clone of the image, including all metadata
-
-    assert(false, "TODO: dynamic image copy");
-}
-
-///
-Image!(ElementType!Img) clone(Img)(auto ref Img src) if (isImage!Img)
-{
-    return clone(src, getGcAllocator());
-}
-
-///
-Image!(ElementType!Img) clone(Img)(auto ref Img src, Allocator* allocator) nothrow @nogc if (isImage!Img)
-{
-    alias Element = ElementType!Img;
-
-    Image!Element dest = wg.image.allocImage!(Element)(src.width, src.height, allocator);
-
-    src.copy(dest);
-
-    return dest;
-}
-
-
 /// Map image elements 
 auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
 {
@@ -171,6 +131,7 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
     import wg.color.rgb.convert : unpackRgbColor;
     import wg.color.rgb.format : RGBFormatDescriptor, parseRGBFormat, makeFormatString;
     import wg.image.format;
+    import wg.image.metadata : MetaData;
 
     // TODO: check if image is already the target format (and use a pass-through path)
 
@@ -254,6 +215,8 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
         @property uint width() const { return image.width; }
         @property uint height() const { return image.height; }
 
+        @property inout(MetaData)* metadata() inout pure nothrow @nogc { return image.metadata; }
+
         auto at(uint x, uint y) const pure nothrow @nogc
         {
             assert(x < width && y < height);
@@ -269,4 +232,48 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
     }
 
     return DynamicConv(image);
+}
+
+///
+enum Placement
+{
+    right, below
+}
+
+/// Join 2 images 
+auto join(Placement placement = Placement.right, Img1, Img2)(auto ref Img1 image1, auto ref Img2 image2) pure nothrow @nogc
+{
+    import wg.util.util : _max;
+
+    static struct Join
+    {
+        @property uint width() const { return placement == Placement.right ? image1.width + image2.width : _max(image1.width, image2.width); }
+        @property uint height() const { return placement == Placement.right ? _max(image1.height, image2.height) : image1.height + image2.height; }
+
+        auto at(uint x, uint y) const pure nothrow @nogc
+        {
+            assert(x < width && y < height);
+
+            static if (placement == Placement.right)
+            {
+                if (x < image1.width)
+                    return y < image1.height ? image1.at(x, y) : ElementType!Img1();
+                else
+                    return y < image2.height ? image2.at(x - image1.width, y) : ElementType!Img2();
+            }
+            else
+            {
+                if (y < image1.height)
+                    return x < image1.width ? image1.at(x, y) : ElementType!Img1();
+                else
+                    return x < image1.width ? image2.at(x, y - image1.height) : ElementType!Img2();
+            }
+        }
+
+    private:
+        Img1 image1;
+        Img2 image2;
+    }
+
+    return Join(image1, image2);
 }

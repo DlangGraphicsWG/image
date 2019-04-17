@@ -19,7 +19,9 @@ Create an ImageBuffer from a BMP formatted image.
 */
 ImageBuffer readBMP(void[] bmpBuffer)
 {
-    return readBMP(bmpBuffer, getGcAllocator());
+    auto bmp = BMPImage(bmpBuffer);
+    ImageBuffer src = bmp.getImage();
+    return src.clone();
 }
 
 /**
@@ -37,7 +39,9 @@ Create an ImageBuffer from a BMP formatted image.
 */
 Image!RuntimeFormat readBMP(RuntimeFormat)(void[] bmpBuffer)
 {
-    return readBMP!RuntimeFormat(bmpBuffer, getGcAllocator());
+    auto bmp = BMPImage(bmpBuffer);
+    ImageBuffer src = bmp.getImage();
+    return src.convert!(RuntimeFormat).clone();
 }
 
 /**
