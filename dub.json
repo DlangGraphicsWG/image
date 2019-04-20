@@ -1,0 +1,8 @@
+{
+    "name": "wg-image",
+    "description": "Define colors, images, and basic formats.",
+    "homepage": "https://github.com/DlangGraphicsWG/",
+    "license": "BSL-1.0",  
+    "sourcePaths": [ "src" ],
+    "importPaths": [ "src" ]
+}
