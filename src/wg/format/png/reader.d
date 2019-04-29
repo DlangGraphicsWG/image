@@ -28,17 +28,25 @@ private extern(C) nothrow @nogc
 // requires up to about 44KB for inflate but we give it a bit more just to be safe
 private enum zlibInflateMemory = 50 * 1024;
 
+private struct ZlibStackAllocator
+{
+    ubyte[zlibInflateMemory] zlibBuffer;
+    uint zlibBufferUsed;
+
+    void* allocate(uint size) nothrow @nogc
+    {
+        immutable newUsed = zlibBufferUsed + size;
+        if (newUsed > zlibBuffer.length) return null;
+        auto result = &zlibBuffer[zlibBufferUsed];
+        zlibBufferUsed = newUsed;
+        return result;
+    }
+}
+
 private extern(C) void* zallocFunc(void* opaque, uint items, uint size) nothrow @nogc
 {
-    auto loader = cast(PngLoadData*)opaque;
-    auto res = &loader.zlibBuffer[loader.zlibBufferUsed];
-    loader.zlibBufferUsed += items * size;
-    if (loader.zlibBufferUsed >= zlibInflateMemory)
-    {
-        loader.withError("ZLib didn't have enough memory to complete decompression");
-        return null;
-    }
-    return res;
+    auto allocator = cast(ZlibStackAllocator*)opaque;
+    return allocator.allocate(items * size);
 }
 
 private extern(C) void zfreeFunc(void* opaque, void* address) nothrow @nogc
@@ -72,10 +80,10 @@ PngHeaderResult loadPngHeader(const(ubyte)[] file) nothrow @nogc
     
     PngHeaderResult result = {value: *cast(PngHeaderData*)file.ptr};
     if (result.colorType > PngColorType.max || pngColorTypeToSamples[result.colorType] == 0)
-    {
         return PngHeaderResult("Invalid color type found");
-    }
-    if (!result.bitDepth.isValid())
+    
+    immutable bd = result.bitDepth;
+    if (bd != 1 && bd != 2 && bd != 4 && bd != 8 && bd != 16)
     {
         return PngHeaderResult("Invalid bit depth found");
     }
@@ -127,7 +135,7 @@ ImageResult loadPng(const ubyte[] file, Allocator* allocator,
 
     if (loader.error) return ImageResult(loader.error);
     
-    while (loader.loadPngChunk()) {}
+    loader.loadPngChunks();
 
     if (loader.error) return ImageResult(loader.error);
 
@@ -145,17 +153,12 @@ private struct PngLoadData {
     // to simplify algorithm for moving it to alpha channel.
     ubyte[256] transparency;
     int transLength;
-    ubyte[zlibInflateMemory] zlibBuffer;
-    uint zlibBufferUsed;
-    z_stream zStream;
-    bool unzipDone;
     Allocator* allocator;
     Allocator* chunkAllocator;
     PngChunk* chunks;
     ubyte[] pixels; // decoded pixels
+    ubyte[] pixelBuffer; // pointer into pixels where current non final data resides
     int lineBytes;
-    bool headerAddedToMeta;
-    bool dataFound;
     uint gamma;
     Chromaticities chromaticities;
     bool isSRGB;
@@ -169,14 +172,28 @@ private struct PngLoadData {
         allocator = a;
         chunkAllocator = ca;
 
+        lineBytes = (bitDepth * pngColorTypeToSamples[colorType] * width + 7) / 8;
+
+        result.width = width;
+        result.height = height;
+    }
+
+    private bool setupZlibStream(ref z_stream zStream, void* zlibAllocator) nothrow @nogc
+    {
         import etc.c.zlib : Z_OK;
         if (inflateInit(&zStream) != Z_OK)
+            return withError("Failed to initialize zlib for Png extraction");
+
+        auto targeBitDepth = bitDepth;
+        auto targetSamples = pngColorTypeToSamples[colorType];
+        if (colorType == PngColorType.paletteColor)
         {
-            error = "Failed to initialize zlib for Png extraction";
-            return;
+            targeBitDepth = 8;
+            targetSamples = 3;
         }
-        
-        lineBytes =  (bitDepth * pngColorTypeToSamples[colorType] * width + 7) / 8;
+        if (transLength > 0) targetSamples++;
+        result.rowPitch = (targeBitDepth * targetSamples * width + 7) / 8;
+
         if (interlaceMethod == PngInterlaceMethod.noInterlace)
         {
             zStream.avail_out = (lineBytes + 1) * height;
@@ -204,124 +221,155 @@ private struct PngLoadData {
             // space than necessary but we accept that for simplicity.
         }
 
-        pixels = cast(ubyte[])allocator.allocate(zStream.avail_out);
-        if (pixels.length != zStream.avail_out)
-        {
-            result.error = "Allocation from the given allocator failed";
-            return;
-        }
+        auto pixelBytes = result.rowPitch * height;
+        if (pixelBytes < zStream.avail_out) pixelBytes = zStream.avail_out;
+        pixels = cast(ubyte[])allocator.allocate(pixelBytes);
+        if (pixels.length != pixelBytes) return withError(allocationErrorMessage);
 
-        zStream.next_out = pixels.ptr;
+        pixelBuffer = pixels[pixelBytes - zStream.avail_out..$];
+        zStream.next_out = pixelBuffer.ptr;
         zStream.zalloc = &zallocFunc;
         zStream.zfree = &zfreeFunc;
-        zStream.opaque = &this;
-
-        result.width = width;
-        result.height = height;
-        result.rowPitch = lineBytes;
+        zStream.opaque = zlibAllocator;
+        return true;
     }
 
-    private bool loadPngChunk() nothrow @nogc
+    private bool loadPngChunks() nothrow @nogc
     {
-        auto chunkHeader = loadChunkHeader(data);
-        if (chunkHeader.error) return withError(chunkHeader.error);
+        bool headerAddedToMeta = false;
+        bool dataFound = false;
+        bool unzipDone = false;
 
-        switch (chunkHeader.type)
+        ZlibStackAllocator zlibAllocator;
+        z_stream zStream;
+
+        while (true)
         {
-            case HEADER_CHUNK_TYPE:
-                if (headerAddedToMeta) return withError("Duplicate Header chunk found");
-                headerAddedToMeta = true;
-                goto default;
+            auto chunkHeader = loadChunkHeader(data);
+            if (chunkHeader.error) return withError(chunkHeader.error);
 
-            case DATA_CHUNK_TYPE:
-                import etc.c.zlib : Z_OK, Z_STREAM_END, Z_NO_FLUSH;
-                dataFound = true;
-                zStream.avail_in = chunkHeader.length;
-                zStream.next_in = data.ptr;
-                while (zStream.avail_in != 0)
-                {
-                    immutable res = inflate(&zStream, Z_NO_FLUSH);
-                    if (res == Z_STREAM_END)
-                    {
-                        inflateEnd(&zStream);
-                        unzipDone = true;
-                        break;
+            switch (chunkHeader.type)
+            {
+                case HEADER_CHUNK_TYPE:
+                    if (headerAddedToMeta) return withError("Duplicate Header chunk found");
+                    headerAddedToMeta = true;
+                    goto default;
+
+                case DATA_CHUNK_TYPE:
+                    import etc.c.zlib : Z_OK, Z_STREAM_END, Z_NO_FLUSH;
+                    if (!dataFound) {
+                        if (!setupZlibStream(zStream, &zlibAllocator)) return false;
                     }
-                    if (res != Z_OK)
+                    dataFound = true;
+                    zStream.avail_in = chunkHeader.length;
+                    zStream.next_in = data.ptr;
+                    while (zStream.avail_in != 0)
                     {
-                        inflateEnd(&zStream);
-                        return withError("Failed decompressing the PNG file");
+                        immutable res = inflate(&zStream, Z_NO_FLUSH);
+                        if (res == Z_STREAM_END)
+                        {
+                            inflateEnd(&zStream);
+                            unzipDone = true;
+                            break;
+                        }
+                        if (res != Z_OK)
+                        {
+                            inflateEnd(&zStream);
+                            return withError("Failed decompressing the PNG file");
+                        }
                     }
-                }
-                break;
-            
-            case TRANSPARENCY_CHUNK_TYPE:
-                if (transLength > 0) return withError("Second transparency chunk encountered");
-                if (colorType == PngColorType.paletteColor && chunkHeader.length > (1 << bitDepth))
-                {
-                    return withError("Transparency chunk too long");
-                }
-                transLength = chunkHeader.length;
-                transparency[0..transLength] = data[0..transLength];
-                transparency[transLength..$] = 0xff;
-                goto default;
-            
-            case PALETTE_CHUNK_TYPE:
-                if (palette.length > 0) return withError("Second palette chunk encountered");
-                if (colorType != PngColorType.paletteColor &&
-                    colorType != PngColorType.rgbColor &&
-                    colorType != PngColorType.rgbaColor)
-                {
-                    return withError("Palette found in grayscale image");
-                }
-                if (chunkHeader.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
-                    return withError("Palette chunk length invalid");
-                palette = data[0..chunkHeader.length].asArrayOf!PngPaletteEntry;
-                goto default;
-            
-            case GAMMA_CHUNK_TYPE:
-                gamma = *cast(uint*)data.ptr;
-                goto default;
+                    break;
+                
+                case TRANSPARENCY_CHUNK_TYPE:
+                    if (dataFound) return withError("Found transparency chunk after data chunk");
+                    if (transLength > 0) return withError("Second transparency chunk encountered");
+                    if (colorType == PngColorType.paletteColor && chunkHeader.length > (1 << bitDepth))
+                    {
+                        return withError("Transparency chunk too long");
+                    }
+                    transLength = chunkHeader.length;
+                    transparency[0..transLength] = data[0..transLength];
+                    transparency[transLength..$] = 0xff;
+                    goto default;
+                
+                case PALETTE_CHUNK_TYPE:
+                    if (dataFound) return withError("Found palette chunk after data chunk");
+                    if (transLength > 0) return withError("Found palette chunk after transparency chunk");
+                    if (palette.length > 0) return withError("Second palette chunk encountered");
+                    if (colorType != PngColorType.paletteColor &&
+                        colorType != PngColorType.rgbColor &&
+                        colorType != PngColorType.rgbaColor)
+                    {
+                        return withError("Palette found in grayscale image");
+                    }
+                    if (chunkHeader.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
+                        return withError("Palette chunk length invalid");
+                    palette = data[0..chunkHeader.length].asArrayOf!PngPaletteEntry;
+                    goto default;
+                
+                case GAMMA_CHUNK_TYPE:
+                    import std.bitmanip: swapEndian;
+                    gamma = *cast(uint*)data.ptr;
+                    gamma = gamma.swapEndian;
+                    goto default;
 
-            case CHROMATICITIES_CHUNK_TYPE:
-                chromaticities = *cast(Chromaticities*)data.ptr;
-                goto default;
-            
-            case SRGB_CHUNK_TYPE:
-                isSRGB = true;
-                goto default;
-            
-            case END_CHUNK_TYPE:
-                if (!dataFound) return withError("Png is missing data chunk");
-                if (!unzipDone) return withError("Couldn't complete decompression of png file");
-                if (interlaceMethod == PngInterlaceMethod.adam7) deinterlace();
-                else 
-                {
-                    auto inputData = pixels;
-                    auto output = pixels;
-                    if (!defilter(inputData, output, lineBytes, height)) return false;
-                }
-                setupFormat();
-                return false; // Here false can mean error if error field was set, or it can just mean end of reading process
+                case CHROMATICITIES_CHUNK_TYPE:
+                    import std.bitmanip: swapEndian;
+                    chromaticities = *cast(Chromaticities*)data.ptr;
+                    chromaticities.whiteX = chromaticities.whiteX.swapEndian;
+                    chromaticities.whiteY = chromaticities.whiteY.swapEndian;
+                    chromaticities.redX = chromaticities.redX.swapEndian;
+                    chromaticities.redY = chromaticities.redY.swapEndian;
+                    chromaticities.greenX = chromaticities.greenX.swapEndian;
+                    chromaticities.greenY = chromaticities.greenY.swapEndian;
+                    chromaticities.blueX = chromaticities.blueX.swapEndian;
+                    chromaticities.blueY = chromaticities.blueY.swapEndian;
+                    goto default;
+                
+                case SRGB_CHUNK_TYPE:
+                    isSRGB = true;
+                    goto default;
+                
+                case END_CHUNK_TYPE:
+                    if (!dataFound) return withError("Png is missing data chunk");
+                    if (!unzipDone) return withError("Couldn't complete decompression of png file");
+                    if (interlaceMethod == PngInterlaceMethod.adam7) deinterlace();
+                    else 
+                    {
+                        auto inputData = pixelBuffer;
+                        auto output = pixelBuffer;
+                        immutable isFinalFormat = transLength == 0 &&
+                                (colorType == PngColorType.grayscale || colorType == PngColorType.rgbColor) ||
+                                colorType == PngColorType.grayscaleWithAlpha || colorType == PngColorType.rgbaColor;
 
-            default:
-                if (chunkAllocator == null) break;
-                auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.length).asArrayOf!ubyte;
-                if (chunkMemory.length != PngChunk.sizeof + chunkHeader.length)
-                {
-                    return withError("Allocation from the given chunk allocator failed");
-                }
-                auto mdata = cast(PngChunk*)chunkMemory.ptr;
-                mdata.type[] = chunkHeader.type[];
-                mdata.data = chunkMemory[PngChunk.sizeof..$];
-                mdata.next = chunks;
-                mdata.data[] = data[0..chunkHeader.length];
-                chunks = mdata;
-                break;
+                        // For final formats there are no additional operations so we need to put defiltered
+                        // pixels into their final position
+                        if (isFinalFormat) output = pixels;
+                        if (!defilter(inputData, output, lineBytes, height)) return false;
+                        if (!isFinalFormat) moveFilteredDataToTheEnd();
+                    }
+                    if (!setupFormat()) return false;
+                    return true;
+
+                default:
+                    if (chunkAllocator == null) break;
+                    auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.length).asArrayOf!ubyte;
+                    if (chunkMemory.length != PngChunk.sizeof + chunkHeader.length)
+                    {
+                        return withError("Allocation from the given chunk allocator failed");
+                    }
+                    auto mdata = cast(PngChunk*)chunkMemory.ptr;
+                    mdata.type[] = chunkHeader.type[];
+                    mdata.data = chunkMemory[PngChunk.sizeof..$];
+                    mdata.next = chunks;
+                    mdata.data[] = data[0..chunkHeader.length];
+                    chunks = mdata;
+                    break;
+            }
+
+            data = data[(chunkHeader.length + crcSize)..$];
         }
-
-        data = data[(chunkHeader.length + crcSize)..$];
-        return true;
+        return false;
     }
 
     private bool deinterlace() nothrow @nogc
@@ -346,9 +394,10 @@ private struct PngLoadData {
         ];
         immutable sampleBits = bitDepth * pngColorTypeToSamples[colorType];
 
+        
         // First defilter each row in each interlaced subimage
-        auto inputData = pixels;
-        auto output = pixels;
+        auto inputData = pixelBuffer;
+        auto output = pixelBuffer;
         foreach (i, passWidth; passWidths)
         {
             if (passWidth == 0 || passHeights[i] == 0) continue;
@@ -356,12 +405,19 @@ private struct PngLoadData {
         }
 
         // If defiltering didn't fail allocate space for deinterlaced image and setup deallocation of old pixel data at the end
-        auto newPixels = cast(ubyte[])allocator.allocate(lineBytes * height);
-        if (newPixels.length != lineBytes * height) return withError("Allocation from the given allocator failed");
+        immutable pixelBytes = result.rowPitch * height;
+        auto newPixels = cast(ubyte[])allocator.allocate(pixelBytes);
+        if (newPixels.length != pixelBytes) return withError(allocationErrorMessage);
+        ubyte[] newPixelBuffer;
+        if (colorType == PngColorType.grayscaleWithAlpha || colorType == PngColorType.rgbaColor)
+            newPixelBuffer = newPixels;
+        else
+            newPixelBuffer = newPixels[pixelBytes - lineBytes * height..$];
         scope (exit)
         {
             auto toDeallocate = pixels;
             pixels = newPixels;
+            pixelBuffer = newPixelBuffer;
             allocator.deallocate(toDeallocate);
         }
 
@@ -380,7 +436,7 @@ private struct PngLoadData {
                     for (int x = startx; x < lineBytes; x += 8 * bytesPerPixel)
                     {
                         immutable newPos = linePos + x;
-                        newPixels[newPos..newPos + bytesPerPixel] = pixels[i..i + bytesPerPixel];
+                        newPixelBuffer[newPos..newPos + bytesPerPixel] = pixelBuffer[i..i + bytesPerPixel];
                         i += bytesPerPixel;
                     }
                 }
@@ -396,7 +452,7 @@ private struct PngLoadData {
                     for (int x = startx; x < lineBytes; x += 4 * bytesPerPixel)
                     {
                         immutable newPos = linePos + x;
-                        newPixels[newPos..newPos + bytesPerPixel] = pixels[i..i + bytesPerPixel];
+                        newPixelBuffer[newPos..newPos + bytesPerPixel] = pixelBuffer[i..i + bytesPerPixel];
                         i += bytesPerPixel;
                     }
                 }
@@ -412,7 +468,7 @@ private struct PngLoadData {
                     for (int x = startx; x < lineBytes; x += 2 * bytesPerPixel)
                     {
                         immutable newPos = linePos + x;
-                        newPixels[newPos..newPos + bytesPerPixel] = pixels[i..i + bytesPerPixel];
+                        newPixelBuffer[newPos..newPos + bytesPerPixel] = pixelBuffer[i..i + bytesPerPixel];
                         i += bytesPerPixel;
                     }
                 }
@@ -421,7 +477,7 @@ private struct PngLoadData {
             for (int y = 1; y < height; y += 2)
             {
                 immutable newPos = y * lineBytes;
-                newPixels[newPos..newPos + lineBytes] = pixels[i..i + lineBytes];
+                newPixelBuffer[newPos..newPos + lineBytes] = pixelBuffer[i..i + lineBytes];
                 i += lineBytes;
             }
         }
@@ -430,22 +486,25 @@ private struct PngLoadData {
             import core.bitop: ror;
             int i = 0; // Counter over bytes
             int ic = 0; // Counter over bits
+            immutable lineBits = sampleBits * width;
             immutable ubyte andMask = cast(ubyte)((1 << bitDepth) - 1);
             immutable ubyte startShift = cast(ubyte)(8 - bitDepth);
             immutable ubyte startMask = cast(ubyte)(andMask << startShift);
             // Pass 1 and 2
             for (int pass = 0; pass < 2; pass++)
             {
-                immutable startx = pass * (4 * bitDepth / 8);
+                immutable startx = pass * 4 * bitDepth;
+                immutable xinc = bitDepth * 8;
                 immutable newBitShift = (24 - (pass * 4 + 1) * bitDepth) % 8;
                 for (int y = 0; y < height; y += 8)
                 {
                     ubyte shift = startShift;
                     ubyte mask = startMask;
                     immutable linePos = y * lineBytes;
-                    for (int x = startx; x < lineBytes; x += bitDepth)
+                    for (int bitx = startx; bitx < lineBits; bitx += xinc)
                     {
-                        newPixels[linePos + x] |= cast(ubyte)((((pixels[i] & mask) >> shift) & andMask) << newBitShift);
+                        immutable x = bitx / 8;
+                        newPixelBuffer[linePos + x] |= cast(ubyte)((((pixelBuffer[i] & mask) >> shift) & andMask) << newBitShift);
                         shift = (shift + 8 - bitDepth) & 0x7;
                         mask = ror(mask, cast(uint)bitDepth);
                         ic += bitDepth;
@@ -458,29 +517,27 @@ private struct PngLoadData {
             // Pass 3 and 4
             for (int pass = 0; pass < 2; pass++)
             {
-                immutable startx = pass * (2 * bitDepth / 8);
+                immutable startx = pass * 2 * bitDepth;
+                immutable xinc = bitDepth * 4;
                 immutable starty = (1 - pass) * 4;
-                immutable newBitShift = (16 - (pass * 2 + 1) * bitDepth) % 8;
-                immutable newBitShift2 = bitDepth == 1 ? newBitShift - 4 : newBitShift;
+                int[2] newBitShifts;
+                newBitShifts[0] = (16 - (pass * 2 + 1) * bitDepth) % 8;
+                newBitShifts[1] = bitDepth == 1 ? newBitShifts[0] - 4 : newBitShifts[0];
                 immutable yinc = pass == 0 ? 8 : 4;
                 for (int y = starty; y < height; y += yinc)
                 {
                     ubyte shift = startShift;
                     ubyte mask = startMask;
                     immutable linePos = y * lineBytes;
-                    for (int x = startx; x < lineBytes; x += bitDepth)
+                    auto bitShiftIndex = 0;
+                    for (int bitx = startx; bitx < lineBits; bitx += xinc)
                     {
-                        newPixels[linePos + x] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift;
+                        immutable x = bitx / 8;
+                        immutable newBitShift = newBitShifts[bitShiftIndex];
+                        bitShiftIndex = 1 - bitShiftIndex;
+                        newPixelBuffer[linePos + x] |= (((pixelBuffer[i] & mask) >> shift) & andMask) << newBitShift;
                         shift = (shift + 8 - bitDepth) & 0x7;
                         mask = ror(mask, cast(uint)bitDepth);
-                        ic += bitDepth;
-                        i = ic >> 3;
-
-                        immutable nextPos = linePos + x + bitDepth / 2;
-                        if (nextPos >= linePos + lineBytes) break;
-                        newPixels[nextPos] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift2;
-                        shift = (shift + 8 - bitDepth) & 0x7;
-                        mask = ror(mask, bitDepth);
                         ic += bitDepth;
                         i = ic >> 3;
                     }
@@ -491,45 +548,28 @@ private struct PngLoadData {
             // Pass 5 and 6
             for (int pass = 0; pass < 2; pass++)
             {
+                immutable startx = pass * bitDepth;
+                immutable xinc = bitDepth * 2;
                 immutable starty = 2 - pass * 2;
                 immutable yinc = 4 - pass * 2;
-                immutable newBitShift = 8 - (pass + 1) * bitDepth;
                 immutable shiftOffset = 8 - 2 * bitDepth;
-                immutable newBitShift2 = (newBitShift + shiftOffset) % 8;
-                immutable newBitShift3 = (newBitShift2 + shiftOffset) % 8;
-                immutable newBitShift4 = (newBitShift3 + shiftOffset) % 8;
+                int[4] newBitShifts;
+                newBitShifts[0] = 8 - (pass + 1) * bitDepth;
+                newBitShifts[1] = (newBitShifts[0] + shiftOffset) % 8;
+                newBitShifts[2] = (newBitShifts[1] + shiftOffset) % 8;
+                newBitShifts[3] = (newBitShifts[2] + shiftOffset) % 8;
                 for (int y = starty; y < height; y += yinc)
                 {
                     ubyte shift = startShift;
                     ubyte mask = startMask;
                     immutable linePos = y * lineBytes;
-                    for (int x = 0; x < lineBytes; x += bitDepth)
+                    auto bitShiftIndex = 0;
+                    for (int bitx = startx; bitx < lineBits; bitx += xinc)
                     {
-                        newPixels[linePos + x] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift;
-                        shift = (shift + 8 - bitDepth) & 0x7;
-                        mask = ror(mask, bitDepth);
-                        ic += bitDepth;
-                        i = ic >> 3;
-
-                        int nextPos = linePos + x + bitDepth / 4;
-                        if (nextPos >= linePos + lineBytes) break;
-                        newPixels[nextPos] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift2;
-                        shift = (shift + 8 - bitDepth) & 0x7;
-                        mask = ror(mask, bitDepth);
-                        ic += bitDepth;
-                        i = ic >> 3;
-
-                        nextPos = linePos + x + bitDepth / 2;
-                        if (nextPos >= linePos + lineBytes) break;
-                        newPixels[nextPos] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift3;
-                        shift = (shift + 8 - bitDepth) & 0x7;
-                        mask = ror(mask, bitDepth);
-                        ic += bitDepth;
-                        i = ic >> 3;
-
-                        nextPos = linePos + x + bitDepth - 1;
-                        if (nextPos >= linePos + lineBytes) break;
-                        newPixels[nextPos] |= (((pixels[i] & mask) >> shift) & andMask) << newBitShift4;
+                        immutable x = bitx / 8;
+                        immutable newBitShift = newBitShifts[bitShiftIndex];
+                        bitShiftIndex = (bitShiftIndex + 1) % 4;
+                        newPixelBuffer[linePos + x] |= (((pixelBuffer[i] & mask) >> shift) & andMask) << newBitShift;
                         shift = (shift + 8 - bitDepth) & 0x7;
                         mask = ror(mask, bitDepth);
                         ic += bitDepth;
@@ -543,7 +583,7 @@ private struct PngLoadData {
             for (int y = 1; y < height; y += 2)
             {
                 immutable linePos = y * lineBytes;
-                newPixels[linePos..linePos + lineBytes] = pixels[i..i + lineBytes];
+                newPixelBuffer[linePos..linePos + lineBytes] = pixelBuffer[i..i + lineBytes];
                 i += lineBytes;
             }
         }
@@ -620,16 +660,11 @@ private struct PngLoadData {
         return true;
     }
 
-    private bool moveGrayscaleTransparencyToAlpha() nothrow @nogc
+    private void moveGrayscaleTransparencyToAlpha() nothrow @nogc
     {
         immutable newLineBytes = (bitDepth * 2 * width + 7) / 8;
-        immutable newTotalBytes = newLineBytes * height;
-        auto output = cast(ubyte[])allocator.allocate(newTotalBytes);
-        if (output.length != newTotalBytes) return withError("Failed allocating pixels data from the given allocator");
-        auto input = pixels;
-        auto toDeallocate = pixels;
-        scope (exit) allocator.deallocate(toDeallocate);
-        pixels = output;
+        auto output = pixels;
+        auto input = pixelBuffer;
 
         if (bitDepth == 16)
         {
@@ -673,22 +708,14 @@ private struct PngLoadData {
                 input = input[lineBytes..$];
             }
         }
-
-        result.rowPitch = newLineBytes;
-        return true;
     }
 
     private bool depalettize() nothrow @nogc
     {
         immutable pixelSize = transLength > 0 ? 4 : 3;
         immutable newLineBytes = pixelSize * width;
-        immutable newTotalBytes = newLineBytes * height;
-        auto output = cast(ubyte[])allocator.allocate(newTotalBytes);
-        if (output.length != newTotalBytes) return withError("Failed allocating pixels data from the given allocator");
-        auto input = pixels;
-        auto toDeallocate = pixels;
-        scope (exit) allocator.deallocate(toDeallocate);
-        pixels = output;
+        auto output = pixels;
+        auto input = pixelBuffer;
 
         immutable ubyte mask = cast(ubyte)((1 << bitDepth) - 1);
         immutable int samplesInByte = 8 / bitDepth;
@@ -700,6 +727,7 @@ private struct PngLoadData {
                 foreach (n; 1..samplesInByte + 1)
                 {
                     immutable index = (input[x] >> (8 - bitDepth * n)) & mask;
+                    if (index >= palette.length) return withError("Invalid palette index found");
                     immutable entry = palette[index];
                     output[writePos++] = entry.red;
                     output[writePos++] = entry.green;
@@ -711,20 +739,15 @@ private struct PngLoadData {
             output = output[newLineBytes..$];
             input = input[lineBytes..$];
         }
-        result.rowPitch = pixelSize * width;
+
         return true;
     }
 
-    private bool moveRgbTransparencyToAlpha() nothrow @nogc
+    private void moveRgbTransparencyToAlpha() nothrow @nogc
     {
         immutable newLineBytes = bitDepth * 4 * width / 8;
-        immutable newTotalBytes = newLineBytes * height;
-        auto output = cast(ubyte[])allocator.allocate(newTotalBytes);
-        if (output.length != newTotalBytes) return withError("Failed allocating pixels data from the given allocator");
-        auto input = pixels;
-        auto toDeallocate = pixels;
-        scope (exit) allocator.deallocate(toDeallocate);
-        pixels = output;
+        auto output = pixels;
+        auto input = pixelBuffer;
 
         immutable int samples = width * 3;
 
@@ -739,12 +762,11 @@ private struct PngLoadData {
                 int x = 0;
                 while (x < samples)
                 {
-                    output16[writePos++] = input16[x];
-                    output16[writePos++] = input16[x+1];
-                    output16[writePos++] = input16[x+2];
-                    if (input16[x..x + 3] == transparency16[0..3]) output16[writePos++] = 0;
+                    output16[writePos++] = input16[x++];
+                    output16[writePos++] = input16[x++];
+                    output16[writePos++] = input16[x++];
+                    if (output16[writePos - 3..writePos] == transparency16[0..3]) output16[writePos++] = 0;
                     else output16[writePos++] = 0xffff;
-                    x += 3;
                 }
                 output16 = output16[writePos..$];
                 input16 = input16[samples..$];
@@ -761,7 +783,7 @@ private struct PngLoadData {
                     output[writePos++] = input[x];
                     output[writePos++] = input[x+1];
                     output[writePos++] = input[x+2];
-                    if (input[x..x + 2] == transparency[0..3]) output[writePos++] = 0;
+                    if (output[writePos - 3..writePos] == transparency[0..3]) output[writePos++] = 0;
                     else output[writePos++] = 0xff;
                     x += 3;
                 }
@@ -769,92 +791,231 @@ private struct PngLoadData {
                 input = input[lineBytes..$];
             }
         }
+    }
 
-        result.rowPitch = newLineBytes;
-        return true;
+    private void moveFilteredDataToTheEnd() nothrow @nogc
+    {
+        immutable bufferLength = lineBytes * height;
+        if (bufferLength == pixelBuffer.length) return;
+        auto diff = pixelBuffer.length - bufferLength;
+        foreach_reverse (i; 0..bufferLength)
+        {
+            pixelBuffer[i + diff] = pixelBuffer[i];
+        }
+        pixelBuffer = pixelBuffer[diff..$];
     }
 
     private bool setupFormat() nothrow @nogc
     {
-        static immutable string[] formats = [
-            "",
-            "l_1",
-            "l_2",
-            "l_4",
-            "l",
-            "l_16",
-            "rgb",
-            "rgb_16_16_16",
+        static string getGrayscaleFormat(ubyte bitDepth, bool hasAlpha)
+        {
+            final switch (bitDepth)
+            {
+                case 1: return hasAlpha ? "la_1_1" : "l_1";
+                case 2: return hasAlpha ? "la_2_2" : "l_2";
+                case 4: return hasAlpha ? "la_4_4" : "l_4";
+                case 8: return hasAlpha ? "la" : "l";
+                case 16: return hasAlpha ? "la_16_16" : "l_16";
+            }
+        }
 
-            "",
-            "la_1_1",
-            "la_2_2",
-            "la_4_4",
-            "la",
-            "la_16_16",
-            "rgba",
-            "rgba_16_16_16_16",
-        ];
-
-        int intFormat;
+        static string getRgbFormat(ubyte bitDepth, bool hasAlpha)
+        {
+            final switch (bitDepth)
+            {
+                case 8: return hasAlpha ? "rgba" : "rgb";
+                case 16: return hasAlpha ? "rgba_16_16_16_16" : "rgb_16_16_16";
+            }
+        }
+        
+        result.blockWidth = 1;
+        result.blockHeight = 1;
+        result.bitsPerBlock = 8;
+        string strFormat;
         import core.bitop: bsf;
         final switch (colorType)
         {
             case PngColorType.grayscale:
-                intFormat = bitDepth.bsf() + 1;
                 if (transLength > 0)
                 {
-                    if (!moveGrayscaleTransparencyToAlpha()) return false;
-                    intFormat |= 8;
+                    moveGrayscaleTransparencyToAlpha();
+                    goto case PngColorType.grayscaleWithAlpha;
                 }
+                if (bitDepth < 8) result.blockWidth = 8 / bitDepth;
+                else result.bitsPerBlock = bitDepth;
+                strFormat = getGrayscaleFormat(bitDepth, false);
                 break;
             case PngColorType.grayscaleWithAlpha:
-                intFormat = 8 | (bitDepth.bsf() + 1);
+                if (bitDepth < 4) result.blockWidth = 4 / bitDepth;
+                else result.bitsPerBlock = cast(ubyte)(2 * bitDepth);
+                strFormat = getGrayscaleFormat(bitDepth, true);
                 break;
             case PngColorType.paletteColor:
-                intFormat = 6;
                 if (!depalettize()) return false;
-                if (transLength > 0) intFormat |= 8;
+                result.bitsPerBlock = transLength > 0 ? 32 : 24;
+                strFormat = getRgbFormat(8, transLength > 0);
                 break;
             case PngColorType.rgbColor:
-                intFormat = bitDepth == 8 ? 6 : 7;
-                if (transLength > 0) 
+                if (transLength > 0)
                 {
-                    if (!moveRgbTransparencyToAlpha()) return false;
-                    intFormat |= 8;
+                    moveRgbTransparencyToAlpha();
+                    goto case PngColorType.rgbaColor;
                 }
+                result.bitsPerBlock = bitDepth == 8 ? 24 : 48;
+                strFormat = getRgbFormat(bitDepth, false);
                 break;
             case PngColorType.rgbaColor:
-                intFormat = bitDepth == 8 ? 14 : 15;
+                result.bitsPerBlock = bitDepth == 8 ? 32 : 64;
+                strFormat = getRgbFormat(bitDepth, true);
                 break;
         }
 
-        switch (intFormat) {
-            case     1, 2, 3, 4, 5: result.bitsPerBlock = bitDepth; break;
-            case              6, 7: result.bitsPerBlock = cast(ubyte)(3 * bitDepth); break;
-            case 9, 10, 11, 12, 13: result.bitsPerBlock = cast(ubyte)(2 * bitDepth); break;
-            case            14, 15: result.bitsPerBlock = cast(ubyte)(4 * bitDepth); break;
-            default:                result.bitsPerBlock = 0; break;
-        }
+        enum string rgbFormatTemplate = "R{0.00000, 0.00000, 0.00000}G{0.00000, 0.00000, 0.00000}B{0.00000, 0.00000, 0.00000}";
+        enum string rgbwFormatTemplate = "R{0.00000, 0.00000, 0.00000}G{0.00000, 0.00000, 0.00000}B{0.00000, 0.00000, 0.00000}@{0.00000, 0.00000}";
 
-        auto strFormat = formats[intFormat];
+        char[rgbwFormatTemplate.length] formatBuffer = rgbwFormatTemplate;
+        char[] chrFormat;
+
+        enum string gammaFormatTemplate = "^0.00000";
+        char[gammaFormatTemplate.length] gammaBuffer = gammaFormatTemplate;
+        char[] gammaFormat;
 
         if (!isSRGB)
         {
             if (chromaticities.isSet)
             {
-                // TODO: Read chromaticities and try to find standard RGB color space that mathes.
-                // If found and it is not sRGB add its name to strFormat using allocator.
-                // If not found add string in the format "@{wX, wY}R{rX, rY}G{gX, gY}B{bX, bY}".
+                import wg.color.xyz : xyY;
+                import wg.color.rgb.colorspace: rgbColorSpaceName;
+
+                immutable xw = chromaticities.whiteX / 100_000f;
+                immutable yw = chromaticities.whiteY / 100_000f;
+                immutable xr = chromaticities.redX / 100_000f;
+                immutable yr = chromaticities.redY / 100_000f;
+                immutable xg = chromaticities.greenX / 100_000f;
+                immutable yg = chromaticities.greenY / 100_000f;
+                immutable xb = chromaticities.blueX / 100_000f;
+                immutable yb = chromaticities.blueY / 100_000f;
+                auto white = xyY(xw, yw, 1f);
+
+                const(char)[] colorSpaceName = rgbColorSpaceName(white, xr, yr, xg, yg, xb, yb);
+
+                if (colorSpaceName.length)
+                {
+                    chrFormat = formatBuffer[0..colorSpaceName.length];
+                    chrFormat[] = colorSpaceName[];
+                }
+                else
+                {
+                    chrFormat = formatBuffer[];
+
+                    // libpng tries to explain how to calculate Y from given chromacities here:
+                    // https://github.com/glennrp/libpng/blob/libpng16/png.c#L1295
+                    // I couldn't understand :) it so I devised my own formulas...
+
+                    immutable c0 = xb / yb;
+                    immutable c1 = c0 - xr / yr;
+                    immutable c2 = c0 - xg / yg;
+                    immutable c3 = c0 - xw / yw;
+
+                    immutable d0 = (1 - xb) / yb;
+                    immutable d1 = d0 - (1 - xr) / yr;
+                    immutable d2 = d0 - (1 - xg) / yg;
+                    immutable d3 = d0 - (1 - xw) / yw;
+
+                    immutable Yr = (c3 * d2 - c2 * d3) / (c1 * d2 - c2 * d1);
+                    immutable Yg = (c3 - c1 * Yr) / c2;
+                    immutable Yb = 1f - Yr - Yg;
+
+                    int wp;
+                    if (chromaticities.isWhiteSet()) {
+                        import wg.color.standard_illuminant: standardIlluminantName;
+                        auto strWhitepoint = standardIlluminantName(white);
+                        if (strWhitepoint)
+                        {
+                            chrFormat = formatBuffer[0..rgbFormatTemplate.length + strWhitepoint.length + 2];
+                            chrFormat[$ - strWhitepoint.length - 1 .. $ - 1] = strWhitepoint[];
+                        }
+                        else
+                        {
+                            auto wx = chromaticities.whiteX;
+                            auto wy = chromaticities.whiteY;
+                            wp = rgbwFormatTemplate.length - 2;
+                            foreach(i; 0..5)
+                            {
+                                chrFormat[wp--] = '0' + wy % 10;
+                                wy = wy / 10;
+                            }
+                            chrFormat[wp - 1] = '0' + wy % 10;
+                            wp -= ", 0.".length;
+                            foreach(i; 0..5)
+                            {
+                                chrFormat[wp--] = '0' + wx % 10;
+                                wx /= 10;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        chrFormat = formatBuffer[0..rgbFormatTemplate.length];
+                    }
+                    wp = rgbFormatTemplate.length - 2;
+                    uint[3][3] xys = [[chromaticities.redX, chromaticities.redY, cast(uint)(Yr * 100_000)],
+                                      [chromaticities.greenX, chromaticities.greenY, cast(uint)(Yg * 100_000)],
+                                      [chromaticities.blueX, chromaticities.blueY, cast(uint)(Yb * 100_000)]];
+                    foreach_reverse (y; 0..3)
+                    {
+                        foreach_reverse (x; 0..3)
+                        {
+                            auto xy = xys[y][x];
+                            foreach (i; 0..5)
+                            {
+                                chrFormat[wp--] = '0' + xy % 10;
+                                xy /= 10;
+                            }
+                            chrFormat[wp - 1] = '0' + xy % 10;
+                            wp -= 4;
+                        }
+                        wp -= 1;
+                    }
+                }
             }
-            else if (gamma != 0 && gamma != 45_455) // standard sRGB gamma
+            if (gamma != 0 && gamma != 45_455) // standard sRGB gamma
             {
-                // TODO: Calculate g as 1/gamma and add "^g" to strformat using allocator
+                gammaFormat = gammaBuffer[];
+                if (gamma == 100_000) gammaFormat[1] = '1';
+                else
+                {
+                    uint g = cast(uint)(10_000_000_000L / gamma);
+                    auto wp = gammaFormat.length - 1;
+                    foreach(i; 0..5)
+                    {
+                        gammaFormat[wp--] = '0' + g % 10;
+                        g /= 10;
+                    }
+                    gammaFormat[1] = '0' + g % 10;
+                }
             }
         }
 
+        auto totalFormatLength = strFormat.length + chrFormat.length + gammaFormat.length;
+
+        if (totalFormatLength > strFormat.length)
+        {
+            // Plus 2 for one '_' char and zero terminator at the end of the string
+            char[] finalFormat = cast(char[])allocator.allocate(totalFormatLength + 2);
+            auto formatPart = finalFormat;
+            formatPart[0..strFormat.length] = strFormat[];
+            formatPart[strFormat.length] = '_';
+            formatPart = formatPart[strFormat.length + 1..$];
+            formatPart[0..chrFormat.length] = chrFormat[];
+            formatPart = formatPart[chrFormat.length..$];
+            formatPart[0..gammaFormat.length] = gammaFormat[];
+            formatPart[$ - 1] = '\0';
+            result.pixelFormat = finalFormat.ptr;
+        }
+        else result.pixelFormat = strFormat.ptr;
+
         result.data = pixels.ptr;
-        result.pixelFormat = strFormat.ptr;
         return true;
     }
 

@@ -4,6 +4,8 @@ package enum ubyte[8] PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
 package enum crcSize = 4;
 
+package string allocationErrorMessage = "Allocation from the given allocator failed";
+
 // All the following structs must not have padding
 align(1):
 
@@ -29,29 +31,6 @@ struct PngChunk {
 
 package enum char[4] HEADER_CHUNK_TYPE = "IHDR";
 
-/**
- * Bit depth says how many bits per sample there is. Pixel can have one sample in case of
- * grayscale images and up to 4 samples in case of RGBA images since each channel is one sample.
- */
-enum PngBitDepth: ubyte
-{
-    one = 1,
-    two = 2,
-    four = 4,
-    eight = 8,
-    sixteen = 16
-}
-
-// Checks if the given value actually matches one of defined enum values
-package bool isValid(PngBitDepth depth) nothrow @nogc
-{
-    import std.traits: EnumMembers;
-    static foreach (i, member; EnumMembers!PngBitDepth)
-    {
-        if (depth == member) return true;
-    }
-    return false;
-}
 
 /// Defines the options that png supports for representing pixels
 enum PngColorType: ubyte
@@ -63,7 +42,7 @@ enum PngColorType: ubyte
     rgbaColor = 6
 }
 
-package ubyte[7] pngColorTypeToSamples = [1, 0, 3, 1, 2, 0, 4];
+package enum ubyte[7] pngColorTypeToSamples = [1, 0, 3, 1, 2, 0, 4];
 
 /// The compression methods supported by PNG
 enum PngCompressionMethod: ubyte
@@ -106,8 +85,9 @@ struct PngHeaderData
     ///
     int height;
     
-    /// How many bits there are per sample. A pixel can have one (just grayscale) to four samples (rgba)
-    PngBitDepth bitDepth;
+    /// How many bits there are per sample. A pixel can have one (just grayscale) to four samples (rgba).
+    /// Valid values are 1, 2, 4, 8 and 16
+    ubyte bitDepth;
     
     /// How are pixels represented
     PngColorType colorType;
@@ -169,17 +149,24 @@ enum char[4] GAMMA_CHUNK_TYPE = "gAMA";
 
 enum char[4] CHROMATICITIES_CHUNK_TYPE = "cHRM";
 
+// We initialize it to values for sRGB and since we treat the image as sRGB even when
+// Chromaticities are not given we can say that they are not given even when they were
+// actually read from the file but are equal to these numbers.
 struct Chromaticities {
-    uint whiteX;
-    uint whiteY;
-    uint redX;
-    uint redY;
-    uint greenX;
-    uint greenY;
-    uint blueX;
-    uint blueY;
+    uint whiteX = 31_270;
+    uint whiteY = 32_900;
+    uint redX = 64_000;
+    uint redY = 33_000;
+    uint greenX = 30_000;
+    uint greenY = 60_000;
+    uint blueX = 15_000;
+    uint blueY = 6_000;
+    
     bool isSet() const nothrow @nogc
-    { return whiteX != 0; }
+    { return this != Chromaticities.init; }
+
+    bool isWhiteSet() const nothrow @nogc
+    { return whiteX != Chromaticities.init.whiteX || whiteY != Chromaticities.init.whiteY; }
 }
 
 enum char[4] SRGB_CHUNK_TYPE = "sRGB";

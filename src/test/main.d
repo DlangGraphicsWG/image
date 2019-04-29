@@ -28,7 +28,8 @@ void testPngLoad()
         write("Loading ", fname);
         sw.reset();
         auto p = loadPng(file);
-        writefln(": loaded with status: '%s' in %sμs", p.error ? p.error : "OK", sw.peek().total!("usecs"));
+        import wg.util.util: asDString;
+        writefln(": loaded with status: '%s' in %sμs format: %s", p.error ? p.error : "OK", sw.peek().total!("usecs"), p.pixelFormat.asDString);
 
         import wg.format.bmp : writeBMP;
         if (p.error is null) 

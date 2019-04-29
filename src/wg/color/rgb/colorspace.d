@@ -268,6 +268,23 @@ immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @no
     return null;
 }
 
+/**
+Returns the id of the color namespace with given parameters or empty array if parameters
+don't describe any standard color namespecase.
+*/
+const(char)[] rgbColorSpaceName(xyY white, float rx, float ry, float gx, float gy, float bx, float by) pure nothrow @nogc
+{
+    foreach (ref def; rgbColorSpaceDefs)
+    {
+        if (def.white == white && 
+                def.red.x == rx && def.red.y == ry &&
+                def.green.x == gx && def.green.y == gy && 
+                def.blue.x == bx && def.blue.y == by)
+            return def.id;
+    }
+    return [];
+}
+
 ///
 float toMonochrome(alias cs)(float r, float g, float b) pure
 {
@@ -419,8 +436,10 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
 
     bool buildMatrices = false;
 
-    // find a satandard colour space
-    immutable(RGBColorSpace)* found = findRGBColorspace(s);
+    // find a standard colour space or assume sRGB if only gamma or whitepoint was given
+    immutable(RGBColorSpace)* found;
+    if (s.length) found = findRGBColorspace(s);
+    else if (gamma.length || whitePoint.length) found = rgbColorSpaceDefs.ptr;
     if (found)
     {
         cs = *found;
