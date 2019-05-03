@@ -1,6 +1,0 @@
-{
-    "dscanner.ignoredKeys": [
-        "dscanner.bugs.backwards_slices",
-        "dscanner.bugs.self_assignment"
-    ]
-}

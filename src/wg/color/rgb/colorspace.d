@@ -274,12 +274,13 @@ don't describe any standard color namespecase.
 */
 const(char)[] rgbColorSpaceName(xyY white, float rx, float ry, float gx, float gy, float bx, float by) pure nothrow @nogc
 {
+    enum float epsilon = 0.001f;
     foreach (ref def; rgbColorSpaceDefs)
     {
-        if (def.white == white && 
-                def.red.x == rx && def.red.y == ry &&
-                def.green.x == gx && def.green.y == gy && 
-                def.blue.x == bx && def.blue.y == by)
+        if (def.white.x - white.x < epsilon && def.white.y - white.y < epsilon && def.white.Y - white.Y < epsilon && 
+                def.red.x - rx < epsilon && def.red.y - ry < epsilon &&
+                def.green.x - gx < epsilon && def.green.y - gy < epsilon && 
+                def.blue.x - bx < epsilon && def.blue.y - by < epsilon)
             return def.id;
     }
     return [];

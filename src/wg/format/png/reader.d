@@ -901,8 +901,12 @@ private struct PngLoadData {
 
                 if (colorSpaceName.length)
                 {
-                    chrFormat = formatBuffer[0..colorSpaceName.length];
-                    chrFormat[] = colorSpaceName[];
+                    if (colorSpaceName == "sRGB") chrFormat = [];
+                    else
+                    {
+                        chrFormat = formatBuffer[0..colorSpaceName.length];
+                        chrFormat[] = colorSpaceName[];
+                    }
                 }
                 else
                 {
@@ -982,7 +986,11 @@ private struct PngLoadData {
             if (gamma != 0 && gamma != 45_455) // standard sRGB gamma
             {
                 gammaFormat = gammaBuffer[];
-                if (gamma == 100_000) gammaFormat[1] = '1';
+                if (gamma == 100_000) 
+                {
+                    gammaFormat = gammaBuffer[0..2];
+                    gammaFormat[1] = '1';
+                }
                 else
                 {
                     uint g = cast(uint)(10_000_000_000L / gamma);
