@@ -268,6 +268,26 @@ immutable(RGBColorSpace)* findRGBColorspace(const(char)[] name) pure nothrow @no
     return null;
 }
 
+/**
+Returns the id of the color namespace with given parameters or empty array if parameters
+don't describe any standard color namespecase.
+*/
+const(char)[] rgbColorSpaceName(xyY white, float rx, float ry, float gx, float gy, float bx, float by) pure nothrow @nogc
+{
+    enum float epsilon = 0.001f;
+    import core.math: fabs;
+    foreach (ref def; rgbColorSpaceDefs)
+    {
+        if (fabs(def.white.x - white.x) < epsilon && fabs(def.white.y - white.y) < epsilon &&
+                fabs(def.white.Y - white.Y) < epsilon && 
+                fabs(def.red.x - rx) < epsilon && fabs(def.red.y - ry) < epsilon &&
+                fabs(def.green.x - gx) < epsilon && fabs(def.green.y - gy) < epsilon && 
+                fabs(def.blue.x - bx) < epsilon && fabs(def.blue.y - by) < epsilon)
+            return def.id;
+    }
+    return [];
+}
+
 ///
 float toMonochrome(alias cs)(float r, float g, float b) pure
 {
@@ -419,8 +439,10 @@ size_t parseRGBColorSpace(const(char)[] str, out RGBColorSpace cs) @trusted pure
 
     bool buildMatrices = false;
 
-    // find a satandard colour space
-    immutable(RGBColorSpace)* found = findRGBColorspace(s);
+    // find a standard colour space or assume sRGB if only gamma or whitepoint was given
+    immutable(RGBColorSpace)* found;
+    if (s.length) found = findRGBColorspace(s);
+    else if (gamma.length || whitePoint.length) found = rgbColorSpaceDefs.ptr;
     if (found)
     {
         cs = *found;

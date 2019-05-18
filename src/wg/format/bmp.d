@@ -100,7 +100,7 @@ void[] writeBMP(ref const(ImageBuffer) image, Allocator* allocator) nothrow @nog
         info.yPelsPerMeter = cast(int)(dpi[1] * 39.37007874);
     }
 
-    if (format.colorSpace[0 .. 4] == "sRGB")
+    if (format.colorSpace.length >= 4 && format.colorSpace[0 .. 4] == "sRGB")
         info.csType = LogicalColorSpace.LCS_sRGB;
     else
         info.csType = LogicalColorSpace.LCS_WINDOWS_COLOR_SPACE;

@@ -4,5 +4,8 @@
     "homepage": "https://github.com/DlangGraphicsWG/",
     "license": "BSL-1.0",  
     "sourcePaths": [ "src" ],
-    "importPaths": [ "src" ]
+    "importPaths": [ "src" ],
+    "targetPath" : "build",
+    "targetType": "executable"
 }
+ 
