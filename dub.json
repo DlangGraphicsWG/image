@@ -6,7 +6,6 @@
     "sourcePaths": [ "src" ],
     "importPaths": [ "src" ],
     "targetPath" : "build",
-    "targetType": "executable",
-    "dflags-ldc" : ["-finstrument-functions"]
+    "targetType": "executable"
 }
  
