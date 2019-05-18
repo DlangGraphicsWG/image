@@ -116,8 +116,8 @@ Image!ElementType allocImage(ElementType = RGBX8, MetadataBlocks...)(uint width,
     assert(additionalMetadataBytes.length == MetadataBlocks.length);
 
     ImageBuffer img;
-    void[] mem = allocImageImpl(FormatForPixelType!ElementType, false, width, height, getMetadataSize!(false, MetadataBlocks)(additionalMetadataBytes), getGcAllocator(), img);
-    enforce(mem.length > 0, "Failed to allocate image for type: " ~ ElementType.stringof);
+    allocImageImpl(FormatForPixelType!ElementType, false, width, height, getMetadataSize!(false, MetadataBlocks)(additionalMetadataBytes), getGcAllocator(), img);
+    enforce(img.data != null, "Failed to allocate image for type: " ~ ElementType.stringof);
     arrangeMetadata!(false, MetadataBlocks)(img.metadata, additionalMetadataBytes);
     return Image!ElementType(img);
 }
@@ -132,11 +132,77 @@ Image!ElementType allocImage(ElementType = RGBX8, MetadataBlocks...)(uint width,
 
     ImageBuffer img;
     void[] mem = allocImageImpl(FormatForPixelType!ElementType, false, width, height, getMetadataSize!(true, MetadataBlocks)(additionalMetadataBytes), allocator, img);
-    if (mem.length)
+    if (img.data == null)
     {
-        AllocationMetadata* allocData = arrangeMetadata!(true, MetadataBlocks)(img.metadata, additionalMetadataBytes);
-        allocData.allocations[0].allocator = allocator;
-        allocData.allocations[0].mem = mem;
+        // allocation failed! what should we do?
+        return Image!ElementType();
     }
+    AllocationMetadata* allocData = arrangeMetadata!(true, MetadataBlocks)(img.metadata, additionalMetadataBytes);
+    allocData.allocations[0].allocator = allocator;
+    allocData.allocations[0].mem = img.imageBuffer[];
+    allocData.allocations[1].allocator = allocator;
+    allocData.allocations[1].mem = mem;
     return Image!ElementType(img);
+}
+
+// TODO: DMD bug, this must be declared BEFORE the overloads below!!
+alias clone = wg.image.imagebuffer.clone;
+
+///
+Image!(ElementType!Img) clone(Img)(auto ref Img src) if (isImage!Img)
+{
+    import wg.image.transform : copy;
+
+    alias Element = ElementType!Img;
+
+    // allocate image buffer
+    ImageBuffer img;
+    allocImageImpl(FormatForPixelType!Element, false, src.width, src.height, 0, getGcAllocator(), img);
+    if (img.data == null)
+        return Image!Element(); // TODO: what error strategy here?
+
+    static if (is(typeof(src.metadata)))
+    {
+        // clone the metadata
+        void[] metadata = cloneMetadata(src.metadata, false, 0, getGcAllocator());
+        img.metadata = cast(MetaData*)metadata.ptr;
+    }
+
+    // copy the source image
+    Image!Element dest = Image!Element(img);
+    src.copy(dest);
+
+    return dest;
+}
+
+///
+Image!(ElementType!Img) clone(Img)(auto ref Img src, Allocator* allocator) nothrow @nogc if (isImage!Img)
+{
+    import wg.image.transform : copy;
+
+    alias Element = ElementType!Img;
+
+    // allocate image buffer
+    ImageBuffer img;
+    allocImageImpl(FormatForPixelType!Element, false, src.width, src.height, 0, allocator, img);
+    if (img.data == null)
+        return Image!Element(); // TODO: what error strategy here?
+
+    // clone the metadata and add "ALOC" block
+    const(MetaData)* srcMd = null;
+    static if (is(typeof(src.metadata)))
+        srcMd = src.metadata;
+    void[] metadata = cloneMetadata(srcMd, true, 0, allocator);
+    img.metadata = cast(MetaData*)metadata.ptr;
+
+    // add image data to allocation metadata
+    AllocationMetadata* allocData = img.getMetadata!AllocationMetadata();
+    allocData.allocations[1].allocator = allocator;
+    allocData.allocations[1].mem = img.imageBuffer[];
+
+    // copy the source image
+    Image!Element dest = Image!Element(img);
+    src.copy(dest);
+
+    return dest;
 }

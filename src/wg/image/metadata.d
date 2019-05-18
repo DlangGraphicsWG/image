@@ -39,19 +39,29 @@ struct MetaData
     }
 }
 
+/**
+Find metadata header in image by id.
+*/
+inout(MetaData)* getMetadataHeader(ref inout(ImageBuffer) image, const(char)[4] id) @safe pure nothrow @nogc
+{
+    inout(MetaData)* md = image.metadata;
+    while (md)
+    {
+        if (md.magic == id)
+            return md;
+        md = md.next;
+    }
+    return null;
+}
 
 /**
 Find metadata structure in image by id.
 */
 inout(void)[] getMetadata(ref inout(ImageBuffer) image, const(char)[4] id) @safe pure nothrow @nogc
 {
-    inout(MetaData)* md = image.metadata;
-    while (md)
-    {
-        if (md.magic == id)
-            return md.data;
-        md = md.next;
-    }
+    inout(MetaData)* md = image.getMetadataHeader(id);
+    if (md)
+        return md.data;
     return null;
 }
 
@@ -60,11 +70,10 @@ Find metadata in image by type.
 */
 inout(MDType)* getMetadata(MDType)(ref inout(ImageBuffer) image) @trusted pure nothrow @nogc
 {
-    inout(void)[] md = image.getMetadata(MDType.ID);
-    if (!md)
-        return null;
-    assert(md.length >= MDType.sizeof); // shouldn't assert for this
-    return cast(inout(MDType)*)md.ptr;
+    inout(MetaData)* md = image.getMetadataHeader(MDType.ID);
+    if (md)
+        return md.data!MDType;
+    return null;
 }
 
 /**

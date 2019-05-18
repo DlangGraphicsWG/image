@@ -11,6 +11,7 @@ module wg.image.transform;
 
 import wg.image;
 import wg.image.imagebuffer;
+import wg.util.allocator;
 
 ///
 enum isImageBuffer(T) = is(T == ImageBuffer) || is(T == Image!U, U);
@@ -49,6 +50,49 @@ Image stripMetadata(Image)(ref Image image) if (isImageBuffer!Image)
 // TODO: flip (not in-place, buffer)
 // TODO: rotation (requires destination image buffer, with matching format)
 
+
+///
+void copy(SrcImg, DestImg)(auto ref SrcImg src, ref DestImg dest) nothrow @nogc if (isImage!SrcImg)// TODO: if (something about dest...)
+{
+    // TODO: assert dest is a writable image
+
+    // strongly type the dest buffer if it's soft-typed
+    static if (is(DestImg == ImageBuffer))
+        auto dst = Image!(ElementType!Src)(dest);
+    else
+        alias dst = dest;
+
+    assert(src.width == dst.width && src.height == dst.height);
+
+    enum srcByRow = __traits(compiles, src.row(0));
+    enum destByRow = __traits(compiles, dst.row(0));
+
+    foreach (y; 0 .. src.height)
+    {
+        static if (srcByRow && destByRow)
+        {
+            dst.row(y)[] = src.row(y)[];
+        }
+        else static if (srcByRow)
+        {
+            auto srcRow = src.row(y);
+            foreach (x; 0 .. src.width)
+                dst.at(x, y) = srcRow[x];
+        }
+        else  static if (destByRow)
+        {
+            auto destRow = dst.row(y);
+            foreach (x; 0 .. src.width)
+                destRow[x] = src.at(x, y);
+        }
+        else
+        {
+            foreach (x; 0 .. src.width)
+                dst.at(x, y) = src.at(x, y);
+        }
+    }
+}
+
 /// Map image elements 
 auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
 {
@@ -57,7 +101,7 @@ auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
         alias width = image.width;
         alias height = image.height;
 
-        auto at(uint x, uint y) const
+        auto at(uint x, uint y) const pure nothrow @nogc
         {
             return mapFunc(image.at(x, y));
         }
@@ -71,7 +115,7 @@ auto map(Img, Fn)(auto ref Img image, auto ref Fn mapFunc)
 }
 
 /// Convert image format
-auto convert(TargetFormat, Img)(auto ref Img image) if (isImage!Img && isValidPixelType!TargetFormat)
+auto convert(TargetFormat, Img)(auto ref Img image) pure nothrow @nogc if (isImage!Img && isValidPixelType!TargetFormat)
 {
     import wg.color : convertColor;
 
@@ -87,12 +131,13 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
     import wg.color.rgb.convert : unpackRgbColor;
     import wg.color.rgb.format : RGBFormatDescriptor, parseRGBFormat, makeFormatString;
     import wg.image.format;
+    import wg.image.metadata : MetaData;
 
     // TODO: check if image is already the target format (and use a pass-through path)
 
     static struct DynamicConv
     {
-        alias ConvertFunc = TargetFormat function(const(void)*, ref const(RGBFormatDescriptor) rgbDesc);
+        alias ConvertFunc = TargetFormat function(const(void)*, ref const(RGBFormatDescriptor) rgbDesc) pure nothrow @nogc;
 
         this()(auto ref ImageBuffer image)
         {
@@ -170,7 +215,9 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
         @property uint width() const { return image.width; }
         @property uint height() const { return image.height; }
 
-        auto at(uint x, uint y) const
+        @property inout(MetaData)* metadata() inout pure nothrow @nogc { return image.metadata; }
+
+        auto at(uint x, uint y) const pure nothrow @nogc
         {
             assert(x < width && y < height);
 
@@ -185,4 +232,48 @@ auto convert(TargetFormat)(auto ref ImageBuffer image) if (isValidPixelType!Targ
     }
 
     return DynamicConv(image);
+}
+
+///
+enum Placement
+{
+    right, below
+}
+
+/// Join 2 images 
+auto join(Placement placement = Placement.right, Img1, Img2)(auto ref Img1 image1, auto ref Img2 image2) pure nothrow @nogc
+{
+    import wg.util.util : _max;
+
+    static struct Join
+    {
+        @property uint width() const { return placement == Placement.right ? image1.width + image2.width : _max(image1.width, image2.width); }
+        @property uint height() const { return placement == Placement.right ? _max(image1.height, image2.height) : image1.height + image2.height; }
+
+        auto at(uint x, uint y) const pure nothrow @nogc
+        {
+            assert(x < width && y < height);
+
+            static if (placement == Placement.right)
+            {
+                if (x < image1.width)
+                    return y < image1.height ? image1.at(x, y) : ElementType!Img1();
+                else
+                    return y < image2.height ? image2.at(x - image1.width, y) : ElementType!Img2();
+            }
+            else
+            {
+                if (y < image1.height)
+                    return x < image1.width ? image1.at(x, y) : ElementType!Img1();
+                else
+                    return x < image1.width ? image2.at(x, y - image1.height) : ElementType!Img2();
+            }
+        }
+
+    private:
+        Img1 image1;
+        Img2 image2;
+    }
+
+    return Join(image1, image2);
 }
