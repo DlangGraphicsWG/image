@@ -10,51 +10,21 @@ import wg.image.imagebuffer;
 // 2. Make PngChunks smarter so they keep their allocator and chunks can easily be added and removed
 // 3. Check sRGB, gAMA and cHRM chunks and return the proper format string using them
 
-private extern(C) nothrow @nogc
-{
-    import etc.c.zlib : z_stream, z_streamp, ZLIB_VERSION;
 
-    // Had to copy function definitions from zlib here in order to add @nogc to them
-    int inflateInit(z_streamp strm)
-    {
-        return inflateInit_(strm, ZLIB_VERSION.ptr, z_stream.sizeof);
-    }
-    int inflateInit_(z_streamp strm, const(char)* versionx, int stream_size);
-    int inflate(z_streamp strm, int flush);
-    int inflateEnd(z_streamp strm);
+///
+enum PngError
+{
+    success,
+    failure,
+    invalid,
+    corrupt
 }
 
-// Documentation (http://www.zlib.net/zlib_tech.html) says that zlib internaly
-// requires up to about 44KB for inflate but we give it a bit more just to be safe
-private enum zlibInflateMemory = 50 * 1024;
+///
+alias PngHeaderResult = Result!(PngHeaderData, PngError);
 
-private struct ZlibStackAllocator
-{
-    ubyte[zlibInflateMemory] zlibBuffer;
-    uint zlibBufferUsed;
-
-    void* allocate(uint size) nothrow @nogc
-    {
-        immutable newUsed = zlibBufferUsed + size;
-        if (newUsed > zlibBuffer.length) return null;
-        auto result = &zlibBuffer[zlibBufferUsed];
-        zlibBufferUsed = newUsed;
-        return result;
-    }
-}
-
-private extern(C) void* zallocFunc(void* opaque, uint items, uint size) nothrow @nogc
-{
-    auto allocator = cast(ZlibStackAllocator*)opaque;
-    return allocator.allocate(items * size);
-}
-
-private extern(C) void zfreeFunc(void* opaque, void* address) nothrow @nogc
-{
-    // No need to do anything since the whole memory will be freed at the end of the process
-}
-
-alias PngHeaderResult = Result!PngHeaderData;
+///
+alias ImageResult = Result!(ImageBuffer, PngError);
 
 /**
  * Loads and returns a PngHeaderResult from a given byte array.
@@ -63,44 +33,44 @@ alias PngHeaderResult = Result!PngHeaderData;
  */
 PngHeaderResult loadPngHeader(const(ubyte)[] file) nothrow @nogc
 {
-    if (file.length < PNG_SIGNATURE.length) return PngHeaderResult("Png image file too short");
+    if (file.length < PNG_SIGNATURE.length)
+        return PngHeaderResult(PngError.invalid, "Png image file too short");
     immutable static pngSignature = PNG_SIGNATURE;
-    if (file[0..PNG_SIGNATURE.length] != pngSignature) return PngHeaderResult("Png header missing");
+    if (file[0..PNG_SIGNATURE.length] != pngSignature) return PngHeaderResult(PngError.invalid, "Png header missing");
 
     file = file[PNG_SIGNATURE.length..$];
 
     immutable chunkHeader = loadChunkHeader(file);
-    if (chunkHeader.error) return PngHeaderResult(chunkHeader.error);
+    if (!chunkHeader)
+        return PngHeaderResult(chunkHeader.error, chunkHeader.message);
 
-    if (chunkHeader.type != HEADER_CHUNK_TYPE)
-        return PngHeaderResult("Png file doesn't start with the header chunk");
+    if (chunkHeader.value.type != HEADER_CHUNK_TYPE)
+        return PngHeaderResult(PngError.invalid, "Png file doesn't start with the header chunk");
 
-    if (chunkHeader.length != PngHeaderData.sizeof) 
-        return PngHeaderResult("Invalid header chunk length");
-    
-    PngHeaderResult result = {value: *cast(PngHeaderData*)file.ptr};
-    if (result.colorType > PngColorType.max || pngColorTypeToSamples[result.colorType] == 0)
-        return PngHeaderResult("Invalid color type found");
-    
-    immutable bd = result.bitDepth;
+    if (chunkHeader.value.length != PngHeaderData.sizeof) 
+        return PngHeaderResult(PngError.invalid, "Invalid header chunk length");
+
+    auto result = PngHeaderResult(*cast(PngHeaderData*)file.ptr);
+    if (result.value.colorType > PngColorType.max || pngColorTypeToSamples[result.value.colorType] == 0)
+        return PngHeaderResult(PngError.invalid, "Invalid color type found");
+
+    immutable bd = result.value.bitDepth;
     if (bd != 1 && bd != 2 && bd != 4 && bd != 8 && bd != 16)
     {
-        return PngHeaderResult("Invalid bit depth found");
+        return PngHeaderResult(PngError.invalid, "Invalid bit depth found");
     }
     import std.bitmanip : swapEndian;
-    result.width = result.width.swapEndian;
-    result.height = result.height.swapEndian;
+    result.value.width = result.value.width.swapEndian;
+    result.value.height = result.value.height.swapEndian;
 
     return result;
 }
 
-alias ImageResult = Result!ImageBuffer;
-
 /// Loads the given byte array as Png image into an ImageBuffer
-ImageResult loadPng(const ubyte[] file) nothrow
+ImageBuffer loadPng(const ubyte[] file)
 {
     PngChunk* chunks;
-    return loadPng(file, getGcAllocator(), null, chunks);
+    return loadPng(file, getGcAllocator(), null, chunks).unwrap;
 }
 
 /// Loads the given byte array as Png image into an ImageBuffer using the given allocator
@@ -114,9 +84,9 @@ ImageResult loadPng(const ubyte[] file, Allocator* allocator) nothrow @nogc
  * Loads the given byte array as Png image into an ImageBuffer and also loads all other
  * present png chunks as a linked list of data
  */
-ImageResult loadPng(const ubyte[] file, out PngChunk* chunks) nothrow
+ImageBuffer loadPng(const ubyte[] file, out PngChunk* chunks)
 {
-    return loadPng(file, getGcAllocator(), getGcAllocator(), chunks);
+    return loadPng(file, getGcAllocator(), getGcAllocator(), chunks).unwrap;
 }
 
 /**
@@ -128,22 +98,25 @@ ImageResult loadPng(const ubyte[] file, out PngChunk* chunks) nothrow
 ImageResult loadPng(const ubyte[] file, Allocator* allocator,
             Allocator* chunkAllocator, out PngChunk* chunks) nothrow @nogc
 {
+    import core.lifetime : move;
+
     auto pngHeader = loadPngHeader(file);
-    if (pngHeader.error) return ImageResult(pngHeader.error);
+    if (!pngHeader)
+        return ImageResult(pngHeader.error, pngHeader.message);
 
-    auto loader = PngLoadData(file, pngHeader, allocator, chunkAllocator);
+    auto loader = PngLoadData(file, pngHeader.value, allocator, chunkAllocator);
 
-    if (loader.error) return ImageResult(loader.error);
-    
     loader.loadPngChunks();
 
-    if (loader.error) return ImageResult(loader.error);
+    if (loader.error)
+        return ImageResult(PngError.failure, loader.error);
 
-    return loader.result;
+    return ImageResult(loader.result.move);
 }
 
 // Structures that holds all the data needed during decoding of PNG and contains operations that does the decoding
-private struct PngLoadData {
+private struct PngLoadData
+{
     PngHeaderData info;
     alias info this;
 
@@ -162,7 +135,7 @@ private struct PngLoadData {
     uint gamma;
     Chromaticities chromaticities;
     bool isSRGB;
-    ImageResult result;
+    ImageBuffer result;
     string error;
 
     this(const(ubyte)[] file, const PngHeaderData header, Allocator* a, Allocator* ca) nothrow @nogc
@@ -246,9 +219,10 @@ private struct PngLoadData {
         while (true)
         {
             auto chunkHeader = loadChunkHeader(data);
-            if (chunkHeader.error) return withError(chunkHeader.error);
+            if (!chunkHeader)
+                return withError(chunkHeader.message);
 
-            switch (chunkHeader.type)
+            switch (chunkHeader.value.type)
             {
                 case HEADER_CHUNK_TYPE:
                     if (headerAddedToMeta) return withError("Duplicate Header chunk found");
@@ -257,11 +231,13 @@ private struct PngLoadData {
 
                 case DATA_CHUNK_TYPE:
                     import etc.c.zlib : Z_OK, Z_STREAM_END, Z_NO_FLUSH;
-                    if (!dataFound) {
-                        if (!setupZlibStream(zStream, &zlibAllocator)) return false;
+                    if (!dataFound)
+                    {
+                        if (!setupZlibStream(zStream, &zlibAllocator))
+                            return false;
                     }
                     dataFound = true;
-                    zStream.avail_in = chunkHeader.length;
+                    zStream.avail_in = chunkHeader.value.length;
                     zStream.next_in = data.ptr;
                     while (zStream.avail_in != 0)
                     {
@@ -283,11 +259,11 @@ private struct PngLoadData {
                 case TRANSPARENCY_CHUNK_TYPE:
                     if (dataFound) return withError("Found transparency chunk after data chunk");
                     if (transLength > 0) return withError("Second transparency chunk encountered");
-                    if (colorType == PngColorType.paletteColor && chunkHeader.length > (1 << bitDepth))
+                    if (colorType == PngColorType.paletteColor && chunkHeader.value.length > (1 << bitDepth))
                     {
                         return withError("Transparency chunk too long");
                     }
-                    transLength = chunkHeader.length;
+                    transLength = chunkHeader.value.length;
                     transparency[0..transLength] = data[0..transLength];
                     transparency[transLength..$] = 0xff;
                     goto default;
@@ -302,9 +278,9 @@ private struct PngLoadData {
                     {
                         return withError("Palette found in grayscale image");
                     }
-                    if (chunkHeader.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
+                    if (chunkHeader.value.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
                         return withError("Palette chunk length invalid");
-                    palette = data[0..chunkHeader.length].asArrayOf!PngPaletteEntry;
+                    palette = data[0..chunkHeader.value.length].asArrayOf!PngPaletteEntry;
                     goto default;
                 
                 case GAMMA_CHUNK_TYPE:
@@ -353,21 +329,21 @@ private struct PngLoadData {
 
                 default:
                     if (chunkAllocator == null) break;
-                    auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.length).asArrayOf!ubyte;
-                    if (chunkMemory.length != PngChunk.sizeof + chunkHeader.length)
+                    auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.value.length).asArrayOf!ubyte;
+                    if (chunkMemory.length != PngChunk.sizeof + chunkHeader.value.length)
                     {
                         return withError("Allocation from the given chunk allocator failed");
                     }
                     auto mdata = cast(PngChunk*)chunkMemory.ptr;
-                    mdata.type[] = chunkHeader.type[];
+                    mdata.type[] = chunkHeader.value.type[];
                     mdata.data = chunkMemory[PngChunk.sizeof..$];
                     mdata.next = chunks;
-                    mdata.data[] = data[0..chunkHeader.length];
+                    mdata.data[] = data[0..chunkHeader.value.length];
                     chunks = mdata;
                     break;
             }
 
-            data = data[(chunkHeader.length + crcSize)..$];
+            data = data[(chunkHeader.value.length + crcSize)..$];
         }
         return false;
     }
@@ -755,7 +731,7 @@ private struct PngLoadData {
         {
             auto input16 = input.asArrayOf!ushort;
             auto output16 = output.asArrayOf!ushort;
-            immutable transparency16 = transparency.asArrayOf!ushort;
+            const transparency16 = transparency.asArrayOf!ushort;
             foreach (y; 0..height)
             {
                 int writePos = 0;
@@ -827,7 +803,7 @@ private struct PngLoadData {
                 case 16: return hasAlpha ? "rgba_16_16_16_16" : "rgb_16_16_16";
             }
         }
-        
+
         result.blockWidth = 1;
         result.blockHeight = 1;
         result.bitsPerBlock = 8;
@@ -1043,36 +1019,31 @@ private struct PngLoadData {
     }
 }
 
-private Result!PngChunkHeader loadChunkHeader(ref const(ubyte)[] file) nothrow @nogc
+private alias PngChunkResult = Result!(PngChunkHeader, PngError);
+private PngChunkResult loadChunkHeader(ref const(ubyte)[] file) nothrow @nogc
 {
-    if (file.length < PngChunkHeader.sizeof) 
-    {
-        return Result!PngChunkHeader("End of file reached too soon");
-    }
+    if (file.length < PngChunkHeader.sizeof)
+        return PngChunkResult(PngError.corrupt, "End of file reached too soon");
     auto chunkHeader = *cast(PngChunkHeader*)file.ptr;
     import std.bitmanip : swapEndian;
     chunkHeader.length = chunkHeader.length.swapEndian;
 
     if (file.length < PngChunkHeader.sizeof + chunkHeader.length + crcSize)
-    {
-        return Result!PngChunkHeader("File size and chunk size mismatch");
-    }
+        return PngChunkResult(PngError.corrupt, "File size and chunk size mismatch");
 
     {
         import std.digest.crc : crc32Of;
         import std.algorithm: reverse;
         auto crcPart = file[4..chunkHeader.length + 8];
-        immutable crc = crc32Of(crcPart)[].reverse;
+        auto crc = crc32Of(crcPart);
         immutable crcStart = PngChunkHeader.sizeof + chunkHeader.length;
         auto const actualCrc = file[crcStart..crcStart + 4];
-        if (crc != actualCrc) 
-        {
-            return Result!PngChunkHeader("CRC check failed");
-        }
+        if (crc[].reverse != actualCrc) 
+            return PngChunkResult(PngError.corrupt, "CRC check failed");
     }
 
     file = file[PngChunkHeader.sizeof..$];
-    return Result!PngChunkHeader(null, chunkHeader);
+    return PngChunkResult(chunkHeader);
 }
 
 /*
@@ -1092,4 +1063,51 @@ private pure ubyte paeth(ubyte a, ubyte b, ubyte c) nothrow @nogc
     if (pa <= pb && pa <= pc) return a;
     else if (pb <= pc) return b;
     else return c;
+}
+
+
+private:
+
+private extern(C) nothrow @nogc
+{
+    import etc.c.zlib : z_stream, z_streamp, ZLIB_VERSION;
+
+    // Had to copy function definitions from zlib here in order to add @nogc to them
+    int inflateInit(z_streamp strm)
+    {
+        return inflateInit_(strm, ZLIB_VERSION.ptr, z_stream.sizeof);
+    }
+    int inflateInit_(z_streamp strm, const(char)* versionx, int stream_size);
+    int inflate(z_streamp strm, int flush);
+    int inflateEnd(z_streamp strm);
+}
+
+// Documentation (http://www.zlib.net/zlib_tech.html) says that zlib internaly
+// requires up to about 44KB for inflate but we give it a bit more just to be safe
+private enum zlibInflateMemory = 50 * 1024;
+
+private struct ZlibStackAllocator
+{
+    ubyte[zlibInflateMemory] zlibBuffer;
+    uint zlibBufferUsed;
+
+    void* allocate(uint size) nothrow @nogc
+    {
+        immutable newUsed = zlibBufferUsed + size;
+        if (newUsed > zlibBuffer.length) return null;
+        auto result = &zlibBuffer[zlibBufferUsed];
+        zlibBufferUsed = newUsed;
+        return result;
+    }
+}
+
+private extern(C) void* zallocFunc(void* opaque, uint items, uint size) nothrow @nogc
+{
+    auto allocator = cast(ZlibStackAllocator*)opaque;
+    return allocator.allocate(items * size);
+}
+
+private extern(C) void zfreeFunc(void* opaque, void* address) nothrow @nogc
+{
+    // No need to do anything since the whole memory will be freed at the end of the process
 }
