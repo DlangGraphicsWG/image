@@ -249,8 +249,7 @@ Color colorFromString(Color = RGBA8)(scope const(char)[] str) pure @safe
     string error = colorFromStringImpl(str, r);
     if (error)
         throw new ConvException(error);
-    return r;
-//    return cast(Color)r;
+    return r.convertColor!Color;
 }
 
 ///
@@ -259,23 +258,23 @@ unittest
     // common hex formats supported:
 
     // 3 digits
-    assert(colorFromString("F80") == RGB8(0xFF, 0x88, 0x00));
-    assert(colorFromString("#F80") == RGB8(0xFF, 0x88, 0x00));
-    assert(colorFromString("$F80") == RGB8(0xFF, 0x88, 0x00));
+    assert(colorFromString!RGB8("F80") == RGB8(0xFF, 0x88, 0x00));
+    assert(colorFromString!RGB8("#F80") == RGB8(0xFF, 0x88, 0x00));
+    assert(colorFromString!RGB8("$F80") == RGB8(0xFF, 0x88, 0x00));
 
     // 6 digits
-    assert(colorFromString("FF8000") == RGB8(0xFF, 0x80, 0x00));
-    assert(colorFromString("#FF8000") == RGB8(0xFF, 0x80, 0x00));
-    assert(colorFromString("$FF8000") == RGB8(0xFF, 0x80, 0x00));
+    assert(colorFromString!RGB8("FF8000") == RGB8(0xFF, 0x80, 0x00));
+    assert(colorFromString!RGB8("#FF8000") == RGB8(0xFF, 0x80, 0x00));
+    assert(colorFromString!RGB8("$FF8000") == RGB8(0xFF, 0x80, 0x00));
 
     // 4/8 digita (/w alpha)
-    assert(colorFromString!RGBA8("#8C41") == RGBA8(0xCC, 0x44, 0x11, 0x88));
-    assert(colorFromString!RGBA8("#80CC4401") == RGBA8(0xCC, 0x44, 0x01, 0x80));
+    assert(colorFromString("#8C41") == RGBA8(0xCC, 0x44, 0x11, 0x88));
+    assert(colorFromString("#80CC4401") == RGBA8(0xCC, 0x44, 0x01, 0x80));
 
     // named colors (case-insensitive)
-    assert(colorFromString("red") == RGB8(0xFF, 0x0, 0x0));
-    assert(colorFromString("WHITE") == RGB8(0xFF, 0xFF, 0xFF));
-    assert(colorFromString("LightGoldenrodYellow") == RGB8(250,250,210));
+    assert(colorFromString!RGB8("red") == RGB8(0xFF, 0x0, 0x0));
+    assert(colorFromString!RGB8("WHITE") == RGB8(0xFF, 0xFF, 0xFF));
+    assert(colorFromString!RGB8("LightGoldenrodYellow") == RGB8(250,250,210));
 
     // parse failure
     RGB8 c;
@@ -296,8 +295,7 @@ bool colorFromString(Color = RGBA8)(scope const(char)[] str, out Color color) pu
     RGBA8 r;
     if (colorFromStringImpl(str, r) != null)
         return false;
-    color = r;
-//    color = cast(Color)r;
+    color = r.convertColor!Color;
     return true;
 }
 
