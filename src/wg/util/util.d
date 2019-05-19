@@ -18,7 +18,7 @@ struct Result(T, EC = ubyte) if (EC() == 0)
     ///
     this()(auto ref T value)
     {
-        import core.lifetime;
+        import core.lifetime : forward;
         this.value = forward!value;
     }
     ///
@@ -34,9 +34,7 @@ struct Result(T, EC = ubyte) if (EC() == 0)
     ///
     ref inout(T) unwrap() inout pure @safe
     {
-        import core.lifetime : move;
         import core.exception;
-
         if (error != EC())
             throw new Exception(message, file, line);
         return value;
