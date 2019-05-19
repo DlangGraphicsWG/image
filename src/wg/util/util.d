@@ -62,6 +62,7 @@ struct Result(T, EC = ubyte) if (EC() == 0)
 ///
 unittest
 {
+    // test success case
     auto r1 = Result!int(10);
     assert(r1 && r1.value == 10 && r1.error == 0);
     try
@@ -74,6 +75,7 @@ unittest
         assert(false);
     }
 
+    // test fail case
     auto r2 = Result!int(1, "failed!");
     assert(!r2 && r2.error != 0);
     try
@@ -86,13 +88,16 @@ unittest
         assert(e.msg[] == "failed!");
     }
 
+    // with custom error enum
     enum ErrorCode : ubyte
     {
         success,
         failure
     }
+
     auto r3 = Result!(int, ErrorCode)(20);
     assert(r3 && r3.value == 20 && r3.error == ErrorCode.success);
+
     auto r4 = Result!(int, ErrorCode)(ErrorCode.failure, "failed!");
     assert(!r4 && r4.error == ErrorCode.failure);
 }
