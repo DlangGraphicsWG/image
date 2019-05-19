@@ -12,17 +12,8 @@ inout(char)[] asDString(inout(char)* cstr) pure nothrow @nogc @trusted
     return cstr[0 .. len];
 }
 
-///
-enum ErrorCode : ubyte
-{
-    ///
-    success = 0,
-    ///
-    failure = 1
-}
-
 /// Template struct representing function result for functions that may return error
-struct Result(T, EC = ErrorCode) if (is(typeof(EC.success)))
+struct Result(T, EC = ubyte) if (EC() == 0)
 {
     ///
     this()(auto ref T value)
@@ -31,10 +22,12 @@ struct Result(T, EC = ErrorCode) if (is(typeof(EC.success)))
         this.value = forward!value;
     }
     ///
-    this(EC error, string message = "Failed")
+    this(EC error, string message = "Failed", string file = __FILE__, int line = __LINE__)
     {
-        assert(error != EC.success);
+        assert(error != EC());
         this.error = error;
+        this.line = line;
+        this.file = file;
         this.message = message;
     }
 
@@ -44,28 +37,33 @@ struct Result(T, EC = ErrorCode) if (is(typeof(EC.success)))
         import core.lifetime : move;
         import core.exception;
 
-        if (error != EC.success)
-            throw new Exception(message);
+        if (error != EC())
+            throw new Exception(message, file, line);
         return value;
     }
 
     ///
     bool opCast(T : bool)() const pure nothrow @safe
     {
-        return error == EC.success;
+        return error == EC();
     }
 
     /// Result value
     T value;
     /// Error code
     EC error;
+    ///
+    int line;
+    ///
+    string file;
     /// Error message in case of an error, null otherwise
     string message;
 }
+///
 unittest
 {
     auto r1 = Result!int(10);
-    assert(r1 && r1.error == ErrorCode.success);
+    assert(r1 && r1.value == 10 && r1.error == 0);
     try
     {
         int x = r1.unwrap;
@@ -76,8 +74,8 @@ unittest
         assert(false);
     }
 
-    auto r2 = Result!int(ErrorCode.failure, "failed!");
-    assert(!r2 && r2.error ==ErrorCode.failure);
+    auto r2 = Result!int(1, "failed!");
+    assert(!r2 && r2.error != 0);
     try
     {
         r2.unwrap;
@@ -87,6 +85,16 @@ unittest
     {
         assert(e.msg[] == "failed!");
     }
+
+    enum ErrorCode : ubyte
+    {
+        success,
+        failure
+    }
+    auto r3 = Result!(int, ErrorCode)(20);
+    assert(r3 && r3.value == 20 && r3.error == ErrorCode.success);
+    auto r4 = Result!(int, ErrorCode)(ErrorCode.failure, "failed!");
+    assert(!r4 && r4.error == ErrorCode.failure);
 }
 
 
