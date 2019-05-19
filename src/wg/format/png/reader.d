@@ -99,10 +99,10 @@ PngHeaderResult loadPngHeader(const(ubyte)[] file) nothrow @nogc
 alias ImageResult = Result!ImageBuffer;
 
 /// Loads the given byte array as Png image into an ImageBuffer
-ImageResult loadPng(const ubyte[] file) nothrow
+ImageBuffer loadPng(const ubyte[] file)
 {
     PngChunk* chunks;
-    return loadPng(file, getGcAllocator(), null, chunks);
+    return loadPng(file, getGcAllocator(), null, chunks).unwrap;
 }
 
 /// Loads the given byte array as Png image into an ImageBuffer using the given allocator
@@ -116,9 +116,9 @@ ImageResult loadPng(const ubyte[] file, Allocator* allocator) nothrow @nogc
  * Loads the given byte array as Png image into an ImageBuffer and also loads all other
  * present png chunks as a linked list of data
  */
-ImageResult loadPng(const ubyte[] file, out PngChunk* chunks) nothrow
+ImageBuffer loadPng(const ubyte[] file, out PngChunk* chunks)
 {
-    return loadPng(file, getGcAllocator(), getGcAllocator(), chunks);
+    return loadPng(file, getGcAllocator(), getGcAllocator(), chunks).unwrap;
 }
 
 /**
@@ -130,6 +130,8 @@ ImageResult loadPng(const ubyte[] file, out PngChunk* chunks) nothrow
 ImageResult loadPng(const ubyte[] file, Allocator* allocator,
             Allocator* chunkAllocator, out PngChunk* chunks) nothrow @nogc
 {
+    import core.lifetime : move;
+
     auto pngHeader = loadPngHeader(file);
     if (!pngHeader)
         return ImageResult(ErrorCode.failure, pngHeader.message);
@@ -141,7 +143,7 @@ ImageResult loadPng(const ubyte[] file, Allocator* allocator,
     if (loader.error)
         return ImageResult(ErrorCode.failure, loader.error);
 
-    return ImageResult(loader.result);
+    return ImageResult(loader.result.move);
 }
 
 // Structures that holds all the data needed during decoding of PNG and contains operations that does the decoding
@@ -761,7 +763,7 @@ private struct PngLoadData
         {
             auto input16 = input.asArrayOf!ushort;
             auto output16 = output.asArrayOf!ushort;
-            immutable transparency16 = transparency.asArrayOf!ushort;
+            const transparency16 = transparency.asArrayOf!ushort;
             foreach (y; 0..height)
             {
                 int writePos = 0;
@@ -833,7 +835,7 @@ private struct PngLoadData
                 case 16: return hasAlpha ? "rgba_16_16_16_16" : "rgb_16_16_16";
             }
         }
-        
+
         result.blockWidth = 1;
         result.blockHeight = 1;
         result.bitsPerBlock = 8;
@@ -1064,10 +1066,10 @@ private Result!PngChunkHeader loadChunkHeader(ref const(ubyte)[] file) nothrow @
         import std.digest.crc : crc32Of;
         import std.algorithm: reverse;
         auto crcPart = file[4..chunkHeader.length + 8];
-        immutable crc = crc32Of(crcPart)[].reverse;
+        auto crc = crc32Of(crcPart);
         immutable crcStart = PngChunkHeader.sizeof + chunkHeader.length;
         auto const actualCrc = file[crcStart..crcStart + 4];
-        if (crc != actualCrc) 
+        if (crc[].reverse != actualCrc) 
             return Result!PngChunkHeader(ErrorCode.failure, "CRC check failed");
     }
 

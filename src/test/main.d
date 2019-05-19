@@ -30,17 +30,21 @@ void testPngLoad()
         auto file = cast(ubyte[])read(fname);
         write("Loading ", fname);
         sw.reset();
-        auto p = loadPng(file);
-        writefln(": loaded with status: '%s' in %sμs format: %s", p.message ? p.message : "OK", sw.peek().total!("usecs"), p.value.pixelFormat.asDString);
+        try
+        {
+            auto p = loadPng(file);
+            writefln(": loaded with status: OK in %sμs format: %s", sw.peek().total!("usecs"), p.pixelFormat.asDString);
 
-        if (!p)
-            continue;
-
-        // BMP writer might not support all the formats that Png loader might return so you might want
-        // to just write the row pixels by uncommenting the next line
-        //writeFile(fname ~ ".data", p.data[0..p.rowPitch * p.height]);
-        auto bmpData = writeBMP(p.value);
-        if (bmpData.length > 0) writeFile(fname ~ ".bmp", bmpData);
+            // BMP writer might not support all the formats that Png loader might return so you might want
+            // to just write the row pixels by uncommenting the next line
+            //writeFile(fname ~ ".data", p.data[0..p.rowPitch * p.height]);
+            auto bmpData = writeBMP(p);
+            if (bmpData.length > 0) writeFile(fname ~ ".bmp", bmpData);
+        }
+        catch (Exception e)
+        {
+            writefln(": loaded with status: '%s' in %sμs", e.msg, sw.peek().total!("usecs"));
+        }
     }
 }
 
