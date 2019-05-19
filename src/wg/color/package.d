@@ -299,6 +299,10 @@ bool colorFromString(Color = RGBA8)(scope const(char)[] str, out Color color) pu
     return true;
 }
 
+/// Parse a color from a string at compile time.
+enum colorFromString(const(char)[] str, Color = RGBA8) = colorFromString!(Color)(str);
+
+
 private:
 
 import std.traits : TemplateOf, isInstanceOf;
@@ -405,7 +409,7 @@ string colorFromStringImpl(scope const(char)[] str, out RGBA8 color) pure nothro
             ubyte r = val(hex[0]);
             ubyte g = val(hex[1]);
             ubyte b = val(hex[2]);
-            color = RGBA8(cast(ubyte)(r | (r << 4)), cast(ubyte)(g | (g << 4)), cast(ubyte)(b | (b << 4)), 0);
+            color = RGBA8(cast(ubyte)(r | (r << 4)), cast(ubyte)(g | (g << 4)), cast(ubyte)(b | (b << 4)), 0xFF);
         }
         else if (hex.length == 4)
         {
@@ -420,7 +424,7 @@ string colorFromStringImpl(scope const(char)[] str, out RGBA8 color) pure nothro
             ubyte r = cast(ubyte)(val(hex[0]) << 4) | val(hex[1]);
             ubyte g = cast(ubyte)(val(hex[2]) << 4) | val(hex[3]);
             ubyte b = cast(ubyte)(val(hex[4]) << 4) | val(hex[5]);
-            color = RGBA8(r, g, b, 0);
+            color = RGBA8(r, g, b, 0xFF);
         }
         else if (hex.length == 8)
         {
@@ -454,7 +458,6 @@ string colorFromStringImpl(scope const(char)[] str, out RGBA8 color) pure nothro
     {
         if (streqi(str, k))
         {
-//            mixin("return cast(RGBA8)Colors." ~ k ~ ";");
             mixin("enum Col = Colors." ~ k ~ ";");
             color = RGBA8(Col.r, Col.g, Col.b, 0xFF);
             return null;
