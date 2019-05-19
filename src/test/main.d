@@ -22,24 +22,25 @@ void testPngLoad()
         .filter!(f => f.name.endsWith(".png")).array().sort();
     foreach(string fname; pngFiles)
     {
+        import wg.format.bmp : writeBMP;
+        import wg.util.util: asDString;
+
         // Uncomment the next line and comment the foreach line above to just test loading of one specific image
         //auto fname = "/path/to/PngSuite-2017jul19/specificImage.png";
         auto file = cast(ubyte[])read(fname);
         write("Loading ", fname);
         sw.reset();
         auto p = loadPng(file);
-        import wg.util.util: asDString;
-        writefln(": loaded with status: '%s' in %sμs format: %s", p.error ? p.error : "OK", sw.peek().total!("usecs"), p.pixelFormat.asDString);
+        writefln(": loaded with status: '%s' in %sμs format: %s", p.message ? p.message : "OK", sw.peek().total!("usecs"), p.value.pixelFormat.asDString);
 
-        import wg.format.bmp : writeBMP;
-        if (p.error is null) 
-        {
-            // BMP writer might not support all the formats that Png loader might return so you might want
-            // to just write the row pixels by uncommenting the next line
-            //writeFile(fname ~ ".data", p.data[0..p.rowPitch * p.height]);
-            auto bmpData = writeBMP(p);
-            if (bmpData.length > 0) writeFile(fname ~ ".bmp", bmpData);
-        }
+        if (!p)
+            continue;
+
+        // BMP writer might not support all the formats that Png loader might return so you might want
+        // to just write the row pixels by uncommenting the next line
+        //writeFile(fname ~ ".data", p.data[0..p.rowPitch * p.height]);
+        auto bmpData = writeBMP(p.value);
+        if (bmpData.length > 0) writeFile(fname ~ ".bmp", bmpData);
     }
 }
 

@@ -2,7 +2,7 @@ module wg.format.png.reader;
 
 import wg.util.allocator;
 import wg.format.png.types;
-import wg.util.util: Result, asArrayOf;
+import wg.util.util: Result, ErrorCode, asArrayOf;
 import wg.image.imagebuffer;
 
 // TODO: 
@@ -63,35 +63,37 @@ alias PngHeaderResult = Result!PngHeaderData;
  */
 PngHeaderResult loadPngHeader(const(ubyte)[] file) nothrow @nogc
 {
-    if (file.length < PNG_SIGNATURE.length) return PngHeaderResult("Png image file too short");
+    if (file.length < PNG_SIGNATURE.length)
+        return PngHeaderResult(ErrorCode.failure, "Png image file too short");
     immutable static pngSignature = PNG_SIGNATURE;
-    if (file[0..PNG_SIGNATURE.length] != pngSignature) return PngHeaderResult("Png header missing");
+    if (file[0..PNG_SIGNATURE.length] != pngSignature) return PngHeaderResult(ErrorCode.failure, "Png header missing");
 
     file = file[PNG_SIGNATURE.length..$];
 
     immutable chunkHeader = loadChunkHeader(file);
-    if (chunkHeader.error) return PngHeaderResult(chunkHeader.error);
+    if (!chunkHeader)
+        return PngHeaderResult(ErrorCode.failure, chunkHeader.message);
 
-    if (chunkHeader.type != HEADER_CHUNK_TYPE)
-        return PngHeaderResult("Png file doesn't start with the header chunk");
+    if (chunkHeader.value.type != HEADER_CHUNK_TYPE)
+        return PngHeaderResult(ErrorCode.failure, "Png file doesn't start with the header chunk");
 
-    if (chunkHeader.length != PngHeaderData.sizeof) 
-        return PngHeaderResult("Invalid header chunk length");
-    
-    PngHeaderResult result = {value: *cast(PngHeaderData*)file.ptr};
+    if (chunkHeader.value.length != PngHeaderData.sizeof) 
+        return PngHeaderResult(ErrorCode.failure, "Invalid header chunk length");
+
+    PngHeaderData result = *cast(PngHeaderData*)file.ptr;
     if (result.colorType > PngColorType.max || pngColorTypeToSamples[result.colorType] == 0)
-        return PngHeaderResult("Invalid color type found");
-    
+        return PngHeaderResult(ErrorCode.failure, "Invalid color type found");
+
     immutable bd = result.bitDepth;
     if (bd != 1 && bd != 2 && bd != 4 && bd != 8 && bd != 16)
     {
-        return PngHeaderResult("Invalid bit depth found");
+        return PngHeaderResult(ErrorCode.failure, "Invalid bit depth found");
     }
     import std.bitmanip : swapEndian;
     result.width = result.width.swapEndian;
     result.height = result.height.swapEndian;
 
-    return result;
+    return PngHeaderResult(result);
 }
 
 alias ImageResult = Result!ImageBuffer;
@@ -129,21 +131,22 @@ ImageResult loadPng(const ubyte[] file, Allocator* allocator,
             Allocator* chunkAllocator, out PngChunk* chunks) nothrow @nogc
 {
     auto pngHeader = loadPngHeader(file);
-    if (pngHeader.error) return ImageResult(pngHeader.error);
+    if (!pngHeader)
+        return ImageResult(ErrorCode.failure, pngHeader.message);
 
-    auto loader = PngLoadData(file, pngHeader, allocator, chunkAllocator);
+    auto loader = PngLoadData(file, pngHeader.value, allocator, chunkAllocator);
 
-    if (loader.error) return ImageResult(loader.error);
-    
     loader.loadPngChunks();
 
-    if (loader.error) return ImageResult(loader.error);
+    if (loader.error)
+        return ImageResult(ErrorCode.failure, loader.error);
 
-    return loader.result;
+    return ImageResult(loader.result);
 }
 
 // Structures that holds all the data needed during decoding of PNG and contains operations that does the decoding
-private struct PngLoadData {
+private struct PngLoadData
+{
     PngHeaderData info;
     alias info this;
 
@@ -162,7 +165,7 @@ private struct PngLoadData {
     uint gamma;
     Chromaticities chromaticities;
     bool isSRGB;
-    ImageResult result;
+    ImageBuffer result;
     string error;
 
     this(const(ubyte)[] file, const PngHeaderData header, Allocator* a, Allocator* ca) nothrow @nogc
@@ -246,9 +249,10 @@ private struct PngLoadData {
         while (true)
         {
             auto chunkHeader = loadChunkHeader(data);
-            if (chunkHeader.error) return withError(chunkHeader.error);
+            if (!chunkHeader)
+                return withError(chunkHeader.message);
 
-            switch (chunkHeader.type)
+            switch (chunkHeader.value.type)
             {
                 case HEADER_CHUNK_TYPE:
                     if (headerAddedToMeta) return withError("Duplicate Header chunk found");
@@ -257,11 +261,13 @@ private struct PngLoadData {
 
                 case DATA_CHUNK_TYPE:
                     import etc.c.zlib : Z_OK, Z_STREAM_END, Z_NO_FLUSH;
-                    if (!dataFound) {
-                        if (!setupZlibStream(zStream, &zlibAllocator)) return false;
+                    if (!dataFound)
+                    {
+                        if (!setupZlibStream(zStream, &zlibAllocator))
+                            return false;
                     }
                     dataFound = true;
-                    zStream.avail_in = chunkHeader.length;
+                    zStream.avail_in = chunkHeader.value.length;
                     zStream.next_in = data.ptr;
                     while (zStream.avail_in != 0)
                     {
@@ -283,11 +289,11 @@ private struct PngLoadData {
                 case TRANSPARENCY_CHUNK_TYPE:
                     if (dataFound) return withError("Found transparency chunk after data chunk");
                     if (transLength > 0) return withError("Second transparency chunk encountered");
-                    if (colorType == PngColorType.paletteColor && chunkHeader.length > (1 << bitDepth))
+                    if (colorType == PngColorType.paletteColor && chunkHeader.value.length > (1 << bitDepth))
                     {
                         return withError("Transparency chunk too long");
                     }
-                    transLength = chunkHeader.length;
+                    transLength = chunkHeader.value.length;
                     transparency[0..transLength] = data[0..transLength];
                     transparency[transLength..$] = 0xff;
                     goto default;
@@ -302,9 +308,9 @@ private struct PngLoadData {
                     {
                         return withError("Palette found in grayscale image");
                     }
-                    if (chunkHeader.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
+                    if (chunkHeader.value.length > (1 << bitDepth) * PngPaletteEntry.sizeof)
                         return withError("Palette chunk length invalid");
-                    palette = data[0..chunkHeader.length].asArrayOf!PngPaletteEntry;
+                    palette = data[0..chunkHeader.value.length].asArrayOf!PngPaletteEntry;
                     goto default;
                 
                 case GAMMA_CHUNK_TYPE:
@@ -353,21 +359,21 @@ private struct PngLoadData {
 
                 default:
                     if (chunkAllocator == null) break;
-                    auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.length).asArrayOf!ubyte;
-                    if (chunkMemory.length != PngChunk.sizeof + chunkHeader.length)
+                    auto chunkMemory = chunkAllocator.allocate(PngChunk.sizeof + chunkHeader.value.length).asArrayOf!ubyte;
+                    if (chunkMemory.length != PngChunk.sizeof + chunkHeader.value.length)
                     {
                         return withError("Allocation from the given chunk allocator failed");
                     }
                     auto mdata = cast(PngChunk*)chunkMemory.ptr;
-                    mdata.type[] = chunkHeader.type[];
+                    mdata.type[] = chunkHeader.value.type[];
                     mdata.data = chunkMemory[PngChunk.sizeof..$];
                     mdata.next = chunks;
-                    mdata.data[] = data[0..chunkHeader.length];
+                    mdata.data[] = data[0..chunkHeader.value.length];
                     chunks = mdata;
                     break;
             }
 
-            data = data[(chunkHeader.length + crcSize)..$];
+            data = data[(chunkHeader.value.length + crcSize)..$];
         }
         return false;
     }
@@ -1045,18 +1051,14 @@ private struct PngLoadData {
 
 private Result!PngChunkHeader loadChunkHeader(ref const(ubyte)[] file) nothrow @nogc
 {
-    if (file.length < PngChunkHeader.sizeof) 
-    {
-        return Result!PngChunkHeader("End of file reached too soon");
-    }
+    if (file.length < PngChunkHeader.sizeof)
+        return Result!PngChunkHeader(ErrorCode.failure, "End of file reached too soon");
     auto chunkHeader = *cast(PngChunkHeader*)file.ptr;
     import std.bitmanip : swapEndian;
     chunkHeader.length = chunkHeader.length.swapEndian;
 
     if (file.length < PngChunkHeader.sizeof + chunkHeader.length + crcSize)
-    {
-        return Result!PngChunkHeader("File size and chunk size mismatch");
-    }
+        return Result!PngChunkHeader(ErrorCode.failure, "File size and chunk size mismatch");
 
     {
         import std.digest.crc : crc32Of;
@@ -1066,13 +1068,11 @@ private Result!PngChunkHeader loadChunkHeader(ref const(ubyte)[] file) nothrow @
         immutable crcStart = PngChunkHeader.sizeof + chunkHeader.length;
         auto const actualCrc = file[crcStart..crcStart + 4];
         if (crc != actualCrc) 
-        {
-            return Result!PngChunkHeader("CRC check failed");
-        }
+            return Result!PngChunkHeader(ErrorCode.failure, "CRC check failed");
     }
 
     file = file[PngChunkHeader.sizeof..$];
-    return Result!PngChunkHeader(null, chunkHeader);
+    return Result!PngChunkHeader(chunkHeader);
 }
 
 /*
