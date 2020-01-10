@@ -13,6 +13,7 @@ import wg.image;
 import wg.image.metadata;
 import wg.image.transform;
 import wg.util.allocator;
+import wg.util.parse : parseReal;
 
 /**
 Create an ImageBuffer from a BMP formatted image.

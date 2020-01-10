@@ -5,7 +5,9 @@ import wg.format.png.types;
 import wg.util.util: Result, asArrayOf;
 import wg.image.imagebuffer;
 
-// TODO: 
+import etc.c.zlib : inflateInit, inflate, inflateEnd, z_stream, z_streamp;
+
+// TODO:
 // 1. Make CommonMetadata using pHYs chunk data
 // 2. Make PngChunks smarter so they keep their allocator and chunks can easily be added and removed
 // 3. Check sRGB, gAMA and cHRM chunks and return the proper format string using them
@@ -47,7 +49,7 @@ PngHeaderResult loadPngHeader(const(ubyte)[] file) nothrow @nogc
     if (chunkHeader.value.type != HEADER_CHUNK_TYPE)
         return PngHeaderResult(PngError.invalid, "Png file doesn't start with the header chunk");
 
-    if (chunkHeader.value.length != PngHeaderData.sizeof) 
+    if (chunkHeader.value.length != PngHeaderData.sizeof)
         return PngHeaderResult(PngError.invalid, "Invalid header chunk length");
 
     auto result = PngHeaderResult(*cast(PngHeaderData*)file.ptr);
@@ -255,7 +257,7 @@ private struct PngLoadData
                         }
                     }
                     break;
-                
+
                 case TRANSPARENCY_CHUNK_TYPE:
                     if (dataFound) return withError("Found transparency chunk after data chunk");
                     if (transLength > 0) return withError("Second transparency chunk encountered");
@@ -267,7 +269,7 @@ private struct PngLoadData
                     transparency[0..transLength] = data[0..transLength];
                     transparency[transLength..$] = 0xff;
                     goto default;
-                
+
                 case PALETTE_CHUNK_TYPE:
                     if (dataFound) return withError("Found palette chunk after data chunk");
                     if (transLength > 0) return withError("Found palette chunk after transparency chunk");
@@ -282,7 +284,7 @@ private struct PngLoadData
                         return withError("Palette chunk length invalid");
                     palette = data[0..chunkHeader.value.length].asArrayOf!PngPaletteEntry;
                     goto default;
-                
+
                 case GAMMA_CHUNK_TYPE:
                     import std.bitmanip: swapEndian;
                     gamma = *cast(uint*)data.ptr;
@@ -301,16 +303,16 @@ private struct PngLoadData
                     chromaticities.blueX = chromaticities.blueX.swapEndian;
                     chromaticities.blueY = chromaticities.blueY.swapEndian;
                     goto default;
-                
+
                 case SRGB_CHUNK_TYPE:
                     isSRGB = true;
                     goto default;
-                
+
                 case END_CHUNK_TYPE:
                     if (!dataFound) return withError("Png is missing data chunk");
                     if (!unzipDone) return withError("Couldn't complete decompression of png file");
                     if (interlaceMethod == PngInterlaceMethod.adam7) deinterlace();
-                    else 
+                    else
                     {
                         auto inputData = pixelBuffer;
                         auto output = pixelBuffer;
@@ -370,7 +372,7 @@ private struct PngLoadData
         ];
         immutable sampleBits = bitDepth * pngColorTypeToSamples[colorType];
 
-        
+
         // First defilter each row in each interlaced subimage
         auto inputData = pixelBuffer;
         auto output = pixelBuffer;
@@ -594,7 +596,7 @@ private struct PngLoadData
             output = output[bytesInLine..$];
             inputData = inputData[bytesInLine + 1..$];
         }
-        foreach (row; 1..h) 
+        foreach (row; 1..h)
         {
             immutable filter = inputData[0];
             if (filter > PngFilterType.max) return withError("Invalid filter type detected");
@@ -619,7 +621,7 @@ private struct PngLoadData
                     foreach (i; prev..input.length)
                         output[i] = cast(ubyte)((prevRow[i] + output[i - prev]) / 2 + input[i]);
                     break;
-                
+
                 case PngFilterType.paeth:
                     foreach (i; 0..prev) output[i] = cast(ubyte)(prevRow[i] + input[i]);
                     foreach (i; prev..input.length)
@@ -962,7 +964,7 @@ private struct PngLoadData
             if (gamma != 0 && gamma != 45_455) // standard sRGB gamma
             {
                 gammaFormat = gammaBuffer[];
-                if (gamma == 100_000) 
+                if (gamma == 100_000)
                 {
                     gammaFormat = gammaBuffer[0..2];
                     gammaFormat[1] = '1';
@@ -1038,7 +1040,7 @@ private PngChunkResult loadChunkHeader(ref const(ubyte)[] file) nothrow @nogc
         auto crc = crc32Of(crcPart);
         immutable crcStart = PngChunkHeader.sizeof + chunkHeader.length;
         auto const actualCrc = file[crcStart..crcStart + 4];
-        if (crc[].reverse != actualCrc) 
+        if (crc[].reverse != actualCrc)
             return PngChunkResult(PngError.corrupt, "CRC check failed");
     }
 
@@ -1063,23 +1065,6 @@ private pure ubyte paeth(ubyte a, ubyte b, ubyte c) nothrow @nogc
     if (pa <= pb && pa <= pc) return a;
     else if (pb <= pc) return b;
     else return c;
-}
-
-
-private:
-
-private extern(C) nothrow @nogc
-{
-    import etc.c.zlib : z_stream, z_streamp, ZLIB_VERSION;
-
-    // Had to copy function definitions from zlib here in order to add @nogc to them
-    int inflateInit(z_streamp strm)
-    {
-        return inflateInit_(strm, ZLIB_VERSION.ptr, z_stream.sizeof);
-    }
-    int inflateInit_(z_streamp strm, const(char)* versionx, int stream_size);
-    int inflate(z_streamp strm, int flush);
-    int inflateEnd(z_streamp strm);
 }
 
 // Documentation (http://www.zlib.net/zlib_tech.html) says that zlib internaly

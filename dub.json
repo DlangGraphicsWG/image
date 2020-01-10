@@ -1,11 +1,30 @@
 {
     "name": "wg-image",
     "description": "Define colors, images, and basic formats.",
-    "homepage": "https://github.com/DlangGraphicsWG/",
-    "license": "BSL-1.0",  
+    "copyright": "Copyright © 2020, Dlang Graphics Workgroup",
+    "license": "BSL-1.0",
     "sourcePaths": [ "src" ],
     "importPaths": [ "src" ],
-    "targetPath" : "build",
-    "targetType": "executable"
+    "targetPath" : "bin/$BUILD_TYPE-$ARCH",
+    "targetType": "library",
+    "configurations": [
+        {
+            "name": "library",
+        },
+        {
+            "name": "test",
+            "targetType": "executable",
+            "targetPath": "bin/test-$BUILD_TYPE-$ARCH",
+            "sourcePaths": ["test"],
+            "mainSourceFile": "test/app.d",
+            "copyFiles-windows-x86": ["lib/*.dll"],
+            "copyFiles-windows-x86_64": ["lib64/*.dll"],
+            "versions": [
+                "FI_318",
+            ],
+            "dependencies": {
+                "bindbc-freeimage": "~>0.3.2",
+            },
+        },
+    ],
 }
- 
